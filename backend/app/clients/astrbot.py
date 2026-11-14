@@ -25,12 +25,11 @@ class AstrBotClient:
         self.base_url = settings.astrbot_base_url.rstrip("/")
         self.api_key = settings.astrbot_api_key
         # Keep model generation time generous while failing fast when the
-        # optional local AstrBot service is not running during a demo.
+        # AstrBot service is unreachable.
         self.timeout = httpx.Timeout(
             settings.astrbot_timeout_seconds,
             connect=min(settings.astrbot_timeout_seconds, 5.0),
         )
-        self.local_fallback_enabled = settings.agent_local_fallback_enabled
 
     @property
     def is_configured(self) -> bool:

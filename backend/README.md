@@ -44,10 +44,9 @@ AstrBot 官方 HTTP API 文档：
 ASTRBOT_BASE_URL=http://127.0.0.1:6185
 ASTRBOT_API_KEY=你的AstrBot_API_Key
 ASTRBOT_TIMEOUT_SECONDS=60
-AGENT_LOCAL_FALLBACK_ENABLED=true
 ```
 
-`AGENT_LOCAL_FALLBACK_ENABLED` 默认开启。AstrBot 返回“没有可用模型”或暂时不可用时，后端会继续用本地规则策略完成演示；生产环境可将其设置为 `false`，让配置问题直接暴露。
+AstrBot 未配置 API Key、连接失败或没有可用模型时，`/api/v1/agent/chat` 会直接返回 502/503 错误，由前端展示错误信息。
 
 项目对外接口为 `POST /api/v1/agent/chat`，请求示例：
 
@@ -75,7 +74,7 @@ AstrBot API Key 只保存在后端环境变量中，浏览器不会直接接触 
 
 复制 `.env.example` 为 `.env`，按需调整应用名称、调试模式、日志级别、API 前缀和前端跨域来源。敏感配置不要提交到版本库。
 
-`AGENT_LOCAL_FALLBACK_ENABLED=true` 时，即使 AstrBot 没有可用模型，接口仍会完成意图识别、商品检索、双语话术、商家摘要和人工接管归档。AstrBot 连接建立超时为 5 秒，避免演示等待过久；模型生成仍使用完整的超时时间。
+AstrBot 连接建立超时为 5 秒，避免服务未启动时等待过久；模型生成仍使用完整的超时时间。
 
 ## 目录结构
 

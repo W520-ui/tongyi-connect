@@ -44,7 +44,7 @@ const statusText = computed(() => {
     return 'AstrBot 模型在线'
   }
 
-  return '本地演示策略在线'
+  return 'AstrBot 待命'
 })
 
 async function refreshOverview() {
@@ -116,13 +116,7 @@ function formatTime(value: string) {
 }
 
 function sourceLabel(source: AgentWorkflowData['source']) {
-  if (source === 'astrbot+human-handoff') {
-    return '模型回复 · 已转人工'
-  }
-  if (source === 'astrbot') {
-    return 'AstrBot 模型'
-  }
-  return '本地演示策略'
+  return source === 'astrbot+human-handoff' ? '模型回复 · 已转人工' : 'AstrBot 模型'
 }
 
 function ratio(count: number, total: number) {

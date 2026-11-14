@@ -51,8 +51,7 @@ export interface AgentWorkflowData {
   needs_human: boolean
   handoff_reason: string | null
   steps: string[]
-  source: 'astrbot' | 'astrbot+human-handoff' | 'local-demo'
-  fallback_notice?: string
+  source: 'astrbot' | 'astrbot+human-handoff'
 }
 
 /**

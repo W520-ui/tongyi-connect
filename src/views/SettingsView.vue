@@ -62,7 +62,7 @@ onMounted(() => {
           </div>
           <strong>多步骤服务流程</strong>
           <span>语言识别 · 意图判断 · 商品检索 · 回复生成</span>
-          <small>模型未配置时自动使用本地演示策略，仍可完成完整流程。</small>
+          <small>由 AstrBot 模型生成回复，服务端统一完成意图识别与归档。</small>
         </article>
 
         <article class="status-card">
@@ -85,7 +85,7 @@ onMounted(() => {
           <div class="config-row"><span>前端 API 前缀</span><code>{{ apiBase }}</code></div>
           <div class="config-row"><span>健康检查</span><code>{{ apiBase }}/v1/health</code></div>
           <div class="config-row"><span>AstrBot 凭证</span><strong>仅由后端环境变量读取</strong></div>
-          <div class="config-row"><span>降级策略</span><strong>模型暂不可用时继续演示本地 Agent 流程</strong></div>
+          <div class="config-row"><span>异常处理</span><strong>AstrBot 不可用或缺少模型时返回明确错误</strong></div>
         </div>
       </section>
 

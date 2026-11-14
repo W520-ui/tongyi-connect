@@ -1,9 +1,8 @@
-"""Cross-border service workflow primitives used by the demo agent.
+"""Cross-border service workflow primitives used by the agent.
 
-The project keeps the business workflow separate from the AstrBot transport so
-the demo remains usable while a model provider is being configured.  Once an
-AstrBot provider is available, the same analysis and metrics are attached to
-the model-generated answer.
+The project keeps the business workflow separate from the AstrBot transport:
+every request requires a live model reply, while this module supplies intent
+analysis, catalog matching, merchant summaries and archive metrics.
 """
 
 from __future__ import annotations
@@ -85,27 +84,6 @@ LANGUAGE_LABELS = {
     "zh-CN": "中文",
     "en-US": "英语",
     "es-ES": "西班牙语",
-}
-
-SHIPPING_TRANSLATIONS = {
-    "headset-pro": {"en-US": "5–8 business days", "es-ES": "5–8 días laborables"},
-    "lamp-mini": {"en-US": "6–10 business days", "es-ES": "6–10 días laborables"},
-    "bottle-lite": {"en-US": "7–12 business days", "es-ES": "7–12 días laborables"},
-}
-
-SPEC_TRANSLATIONS = {
-    "headset-pro": {
-        "en-US": {"Battery life": "40 hours", "Bluetooth": "5.3", "Weight": "248g", "Colors": "Obsidian Black, Mist White"},
-        "es-ES": {"Autonomía": "40 horas", "Bluetooth": "5.3", "Peso": "248g", "Colores": "negro obsidiana, blanco niebla"},
-    },
-    "lamp-mini": {
-        "en-US": {"Battery life": "18 hours", "Charging": "USB-C", "Weight": "390g", "Protection": "IPX4"},
-        "es-ES": {"Autonomía": "18 horas", "Carga": "USB-C", "Peso": "390g", "Protección": "IPX4"},
-    },
-    "bottle-lite": {
-        "en-US": {"Capacity": "500ml", "Material": "304 stainless steel", "Heat retention": "12 hours", "Weight": "285g"},
-        "es-ES": {"Capacidad": "500ml", "Material": "acero inoxidable 304", "Conservación térmica": "12 horas", "Peso": "285g"},
-    },
 }
 
 
@@ -415,11 +393,10 @@ def build_workflow_answer(
     message: str,
     analysis: WorkflowAnalysis,
     *,
-    reply: str | None = None,
-    source: Literal["astrbot", "astrbot+human-handoff", "local-demo"] = "local-demo",
-    astrbot_error: str | None = None,
+    reply: str,
+    source: Literal["astrbot", "astrbot+human-handoff"] = "astrbot",
 ) -> dict[str, Any]:
-    final_reply = reply.strip() if isinstance(reply, str) and reply.strip() else _local_reply(message, analysis)
+    final_reply = reply.strip()
     product_name = analysis.product["name"] if analysis.product else "未匹配具体商品"
     summary = _merchant_summary(message, analysis)
     intent_labels = [INTENT_LABELS[item] for item in analysis.intents]
@@ -455,8 +432,6 @@ def build_workflow_answer(
         "steps": steps,
         "source": source,
     }
-    if astrbot_error:
-        answer["fallback_notice"] = "AstrBot 暂不可用或尚未配置模型，已使用本地演示策略完成流程。"
     return answer
 
 
@@ -530,65 +505,6 @@ def _match_product(message: str) -> dict[str, Any] | None:
     return None
 
 
-def _local_reply(message: str, analysis: WorkflowAnalysis) -> str:
-    product = analysis.product
-    name = product["name"] if product else "这款产品"
-    english_name = product["english_name"] if product else "this product"
-
-    if product and {"quote", "logistics"}.issubset(analysis.intents):
-        if analysis.language == "en-US":
-            return (
-                f"The reference price for {english_name} is USD {product['price_usd']:.2f}. "
-                f"It can be shipped internationally; the usual delivery window is {_localized_shipping(product, 'en-US')}. "
-                "Please share the quantity and destination so I can prepare a final quote and shipping plan."
-            )
-        if analysis.language == "es-ES":
-            return (
-                f"El precio de referencia de {english_name} es de {product['price_usd']:.2f} USD. "
-                f"Se puede enviar al extranjero y el plazo habitual es de {_localized_shipping(product, 'es-ES')}. "
-                "Indíqueme la cantidad y el destino para preparar la cotización final."
-            )
-        return (
-            f"您好，{name}参考价为 ${product['price_usd']:.2f}，支持跨境配送，常规时效为{product['shipping_days']}。"
-            "请补充采购数量和目的国家，我可以继续整理最终报价与物流方案。"
-        )
-
-    if analysis.language == "en-US":
-        if analysis.intent == "quote":
-            return f"The reference price for {english_name} is USD {product['price_usd']:.2f}. Please tell me your quantity so I can prepare a tailored quote." if product else "Please share the product name and quantity. I can prepare a cross-border quotation for you."
-        if analysis.intent == "logistics":
-            return f"Yes, {english_name} can be shipped internationally. The usual delivery window is {_localized_shipping(product, 'en-US')} and we will provide tracking after dispatch." if product else "Please share your destination country and product name. I will check the shipping route and estimated delivery time."
-        if analysis.intent == "specs":
-            specs = _localized_specs(product, "en-US") if product else "Please share the product name so I can retrieve its specifications."
-            return f"{english_name} specifications: {specs}." if product else specs
-        if analysis.intent == "after_sales":
-            return "I have recorded your after-sales request. A service specialist will review the order and contact you with the next steps."
-        return "I can help with product prices, specifications, shipping and after-sales questions. What would you like to check?"
-
-    if analysis.language == "es-ES":
-        if analysis.intent == "quote":
-            return f"El precio de referencia de {english_name} es de {product['price_usd']:.2f} USD. Indíqueme la cantidad y prepararé una cotización personalizada." if product else "Indíqueme el nombre del producto y la cantidad para preparar una cotización internacional."
-        if analysis.intent == "logistics":
-            return f"Sí, podemos enviar {english_name} al extranjero. El plazo habitual es de {_localized_shipping(product, 'es-ES')} y recibirá el número de seguimiento después del envío." if product else "Indíqueme el país de destino y el producto para consultar la ruta y el plazo de entrega."
-        if analysis.intent == "specs":
-            specs = _localized_specs(product, "es-ES") if product else "Indíqueme el producto para consultar sus especificaciones."
-            return f"Especificaciones de {english_name}: {specs}." if product else specs
-        if analysis.intent == "after_sales":
-            return "He registrado su solicitud posventa. Un especialista revisará el pedido y le contactará con los siguientes pasos."
-        return "Puedo ayudarle con precios, especificaciones, envíos y servicio posventa. ¿Qué desea consultar?"
-
-    if analysis.intent == "quote":
-        return f"您好，{name}参考价为 ${product['price_usd']:.2f}，请告诉我采购数量，我可以继续整理阶梯报价。" if product else "您好，请补充商品名称和采购数量，我可以为您整理跨境报价。"
-    if analysis.intent == "logistics":
-        return f"您好，{name}支持跨境配送，常规时效为{product['shipping_days']}，发货后会同步物流单号。" if product else "您好，请告诉我目的国家和商品名称，我来查询物流路线与预计时效。"
-    if analysis.intent == "specs":
-        specs = "、".join(f"{key}{value}" for key, value in product["specs"].items()) if product else "请补充商品名称"
-        return f"您好，{name}的主要参数是：{specs}。" if product else f"您好，{specs}，我就能为您查询参数。"
-    if analysis.intent == "after_sales":
-        return "您好，已记录您的售后诉求。该问题需要人工核对订单和凭证，商家会尽快接管处理。"
-    return "您好，我可以协助处理询价、产品参数、物流和售后问题。请直接告诉我想咨询的商品或需求。"
-
-
 def _merchant_summary(message: str, analysis: WorkflowAnalysis) -> str:
     product = analysis.product
     product_info = product["name"] if product else "未识别商品"
@@ -598,14 +514,3 @@ def _merchant_summary(message: str, analysis: WorkflowAnalysis) -> str:
         f"意图：{INTENT_LABELS[analysis.intent]}；商品：{product_info}；"
         f"处理建议：{handoff}。原始咨询：{message.strip()}"
     )
-
-
-def _localized_shipping(product: dict[str, Any], language: str) -> str:
-    return SHIPPING_TRANSLATIONS.get(product["id"], {}).get(language, product["shipping_days"])
-
-
-def _localized_specs(product: dict[str, Any], language: str) -> str:
-    translated = SPEC_TRANSLATIONS.get(product["id"], {}).get(language)
-    values = translated or product["specs"]
-    return ", ".join(f"{key}: {value}" for key, value in values.items())
-

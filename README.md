@@ -48,7 +48,7 @@ FastAPI 后端工程位于 [`backend/`](backend/README.md)，本地启动方式�
 
 前端工作台已经接入 Agent 对话面板：浏览器请求本项目的 `/api/v1/agent/chat`，后端再以 `X-API-Key` 调用 AstrBot 的 `/api/v1/chat`。AstrBot 的 Key 只放在 `backend/.env`，不进入前端。
 
-即使 AstrBot 尚未配置大模型提供商，默认的 `AGENT_LOCAL_FALLBACK_ENABLED=true` 也会使用本地演示策略完成商品检索、意图识别、双语话术和人工接管流程；配置模型后，AstrBot 的回复会自动替换本地话术。
+Agent 对话依赖 AstrBot 的可用对话模型。未配置 `ASTRBOT_API_KEY`、无法连接服务或没有可用模型时，`/api/v1/agent/chat` 会直接返回 502/503 错误，由前端展示错误提示，不再生成兜底回复。
 
 看板与人机协同接口：
 
@@ -65,4 +65,4 @@ FastAPI 后端工程位于 [`backend/`](backend/README.md)，本地启动方式�
 3. 发送“客户说耳机收到后无法开机，帮我登记售后”，查看人工接管队列，点击“确认接管”完成闭环。
 4. 查看意图统计、语言分布和最近咨询归档；设置页可以检查后端健康状态与现场演示顺序。
 
-前端请求的 Agent 超时为 70 秒，后端连接 AstrBot 的建立连接超时为 5 秒。这样模型有足够的生成时间，AstrBot 未启动时也能快速进入本地演示策略。
+前端请求的 Agent 超时为 70 秒，后端连接 AstrBot 的建立连接超时为 5 秒。这样模型有足够的生成时间，AstrBot 未启动时也能快速返回错误。

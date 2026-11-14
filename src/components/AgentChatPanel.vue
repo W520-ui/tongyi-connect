@@ -48,7 +48,7 @@ const agentStatus = computed(() => {
     return 'AstrBot 已接入'
   }
 
-  return '本地演示策略可用'
+  return 'AstrBot 待命'
 })
 
 function parseAgentData(data: unknown): AgentWorkflowData | null {
@@ -187,9 +187,6 @@ function handleKeydown(event: KeyboardEvent) {
             </div>
             <div v-if="message.workflow.needs_human" class="handoff-alert">
               <strong>需要人工接管</strong>{{ message.workflow.handoff_reason }}
-            </div>
-            <div v-if="message.workflow.fallback_notice" class="fallback-notice">
-              {{ message.workflow.fallback_notice }}
             </div>
           </div>
         </div>
@@ -472,27 +469,18 @@ h3 {
   font-weight: 500;
 }
 
-.handoff-alert,
-.fallback-notice {
+.handoff-alert {
   margin-top: 10px;
   padding: 8px 10px;
   border-radius: 8px;
   font-size: 11px;
   line-height: 1.6;
-}
-
-.handoff-alert {
   color: #b54708;
   background: #fffaeb;
 }
 
 .handoff-alert strong {
   margin-right: 6px;
-}
-
-.fallback-notice {
-  color: #475467;
-  background: #f2f4f7;
 }
 
 .message-bubble--pending {
