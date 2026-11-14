@@ -9,6 +9,7 @@
 - Vue Router
 - Pinia
 - 原生 Fetch 请求封装
+- Vitest + Vue Test Utils（前端单元测试）
 - 后端：FastAPI + 自研进程内 Agent 运行时（Python 3.11+）
 
 ## 本地运行
@@ -30,16 +31,25 @@ npm run dev
 npm run build
 ```
 
+前端单元测试（运行在 jsdom 中，不需要启动后端）：
+
+```bash
+npm run test
+```
+
 ## 目录约定
 
 ```text
 src/
+├── components/    可复用组件
 ├── layouts/       应用级布局
 ├── router/        路由配置
 ├── services/      后端请求封装
 ├── stores/        Pinia 状态
 └── views/         页面入口
 ```
+
+单元测试放在被测代码旁边的 `__tests__/` 目录里，文件名以 `.spec.ts` 结尾。
 
 复制 `.env.example` 为 `.env.local` 后，可通过 `VITE_API_BASE_URL` 配置后端 API 地址。开发服务器会将 `/api` 请求代理到本地 FastAPI（`http://127.0.0.1:8000`）。
 
