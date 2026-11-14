@@ -44,11 +44,11 @@ const agentStatus = computed(() => {
     .reverse()
     .find((message) => message.workflow)?.workflow
 
-  if (latestWorkflow?.source?.startsWith('astrbot')) {
-    return 'AstrBot 已接入'
+  if (latestWorkflow?.source?.startsWith('native')) {
+    return 'Agent 已接入'
   }
 
-  return 'AstrBot 待命'
+  return 'Agent 待命'
 })
 
 function parseAgentData(data: unknown): AgentWorkflowData | null {
@@ -73,7 +73,7 @@ function stringifyAgentData(data: unknown): string {
     }
   }
 
-  return data ? JSON.stringify(data, null, 2) : 'AstrBot 已返回空结果。'
+  return data ? JSON.stringify(data, null, 2) : 'Agent 已返回空结果。'
 }
 
 async function scrollToLatest() {
@@ -115,7 +115,7 @@ async function sendMessage() {
       emit('workflowComplete', workflow)
     }
   } catch (error) {
-    const message = error instanceof ApiError ? error.message : 'Agent 请求失败，请检查后端和 AstrBot 是否已启动。'
+    const message = error instanceof ApiError ? error.message : 'Agent 请求失败，请检查后端服务与模型配置。'
     errorMessage.value = message
     messages.value.push({ id: Date.now() + 1, role: 'error', content: message })
   } finally {
@@ -141,7 +141,7 @@ function handleKeydown(event: KeyboardEvent) {
   <section class="agent-card" aria-labelledby="agent-title">
     <div class="agent-card__header">
       <div>
-        <div class="agent-card__eyebrow">AstrBot Agent</div>
+        <div class="agent-card__eyebrow">通译智联 Agent</div>
         <h3 id="agent-title">跨境咨询联调</h3>
       </div>
       <span class="agent-card__status"><span aria-hidden="true"></span>{{ agentStatus }}</span>
@@ -192,7 +192,7 @@ function handleKeydown(event: KeyboardEvent) {
         </div>
       </div>
       <div v-if="isSending" class="message-row message-row--assistant">
-        <div class="message-bubble message-bubble--pending">AstrBot 正在处理…</div>
+        <div class="message-bubble message-bubble--pending">智能体正在处理…</div>
       </div>
     </div>
 

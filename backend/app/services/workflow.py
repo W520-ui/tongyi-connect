@@ -1,6 +1,6 @@
 """Cross-border service workflow primitives used by the agent.
 
-The project keeps the business workflow separate from the AstrBot transport:
+The project keeps the business workflow separate from the agent runtime:
 every request requires a live model reply, while this module supplies intent
 analysis, catalog matching, merchant summaries and archive metrics.
 """
@@ -105,7 +105,9 @@ class WorkflowMetrics:
     def __init__(self, db_path: Path | None = None) -> None:
         self.db_path = db_path or Path(__file__).resolve().parents[2] / "data" / "workflow.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(self.db_path)
+        # The agent runtime may serve requests from a worker thread (e.g.
+        # test clients or sync endpoints), so allow cross-thread use.
+        self.connection = sqlite3.connect(self.db_path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
         self.connection.execute(
             """
@@ -394,7 +396,7 @@ def build_workflow_answer(
     analysis: WorkflowAnalysis,
     *,
     reply: str,
-    source: Literal["astrbot", "astrbot+human-handoff"] = "astrbot",
+    source: Literal["native", "native+human-handoff"] = "native",
 ) -> dict[str, Any]:
     final_reply = reply.strip()
     product_name = analysis.product["name"] if analysis.product else "未匹配具体商品"

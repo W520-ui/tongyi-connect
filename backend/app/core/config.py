@@ -13,9 +13,6 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
     )
-    astrbot_base_url: str = "http://127.0.0.1:6185"
-    astrbot_api_key: str | None = None
-    astrbot_timeout_seconds: float = 60.0
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

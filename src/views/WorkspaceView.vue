@@ -40,11 +40,11 @@ const statusText = computed(() => {
     return '正在连接服务'
   }
 
-  if (lastWorkflow.value?.source?.startsWith('astrbot')) {
-    return 'AstrBot 模型在线'
+  if (lastWorkflow.value?.source?.startsWith('native')) {
+    return 'Agent 模型在线'
   }
 
-  return 'AstrBot 待命'
+  return 'Agent 待命'
 })
 
 async function refreshOverview() {
@@ -116,7 +116,7 @@ function formatTime(value: string) {
 }
 
 function sourceLabel(source: AgentWorkflowData['source']) {
-  return source === 'astrbot+human-handoff' ? '模型回复 · 已转人工' : 'AstrBot 模型'
+  return source === 'native+human-handoff' ? '模型回复 · 已转人工' : 'Agent 模型'
 }
 
 function ratio(count: number, total: number) {

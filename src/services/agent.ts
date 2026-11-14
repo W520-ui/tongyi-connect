@@ -1,10 +1,7 @@
 import { request } from './http'
 
 export interface AgentChatFlags {
-  enable_inline_genui?: boolean
-  enable_default_system_prompt?: boolean
   enable_streaming?: boolean
-  enable_reasoning?: boolean
 }
 
 export interface AgentChatRequest {
@@ -12,10 +9,6 @@ export interface AgentChatRequest {
   session_id?: string
   username?: string
   locale?: string
-  config_id?: string
-  config_name?: string
-  selected_provider?: string
-  selected_model?: string
   flags?: AgentChatFlags
 }
 
@@ -51,11 +44,11 @@ export interface AgentWorkflowData {
   needs_human: boolean
   handoff_reason: string | null
   steps: string[]
-  source: 'astrbot' | 'astrbot+human-handoff'
+  source: 'native' | 'native+human-handoff'
 }
 
 /**
- * 通过本项目后端调用 AstrBot，浏览器不直接接触 AstrBot API Key。
+ * 通过本项目后端调用自研 Agent 运行时，浏览器不直接接触模型密钥。
  */
 export function sendAgentMessage<T = unknown>(payload: AgentChatRequest) {
   return request<AgentChatResponse<T>>('/v1/agent/chat', {

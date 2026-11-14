@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agent.engine import get_agent_engine
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.services.workflow import metrics
@@ -15,6 +16,7 @@ settings = get_settings()
 async def lifespan(_app: FastAPI):
     yield
     metrics.close()
+    get_agent_engine().close()
 
 logging.basicConfig(
     level=settings.log_level.upper(),

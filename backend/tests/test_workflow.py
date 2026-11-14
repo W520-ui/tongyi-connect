@@ -1,31 +1,11 @@
-import asyncio
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
-from app.clients.astrbot import AstrBotError, _parse_sse_response
-from app.schemas.agent import AgentChatRequest
-from app.services.agent import AgentService
 from app.services.workflow import WorkflowMetrics, analyze_message, build_workflow_answer
 
 
 MODEL_REPLY = "The Nebula ANC Headphones Pro ships to Spain in 5-8 business days."
-
-
-def run_chat(client, message="Please quote the Nebula headphones"):
-    """Run AgentService against a throwaway metrics database."""
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        isolated_metrics = WorkflowMetrics(Path(temp_dir) / "agent-test.db")
-        try:
-            with patch("app.services.agent.metrics", isolated_metrics):
-                result = asyncio.run(
-                    AgentService(client).chat(AgentChatRequest(message=message))
-                )
-            return result, isolated_metrics.snapshot()
-        finally:
-            isolated_metrics.close()
 
 
 class WorkflowAnalysisTests(unittest.TestCase):
@@ -38,7 +18,7 @@ class WorkflowAnalysisTests(unittest.TestCase):
         self.assertEqual(set(result["detected_intents"]), {"quote", "logistics"})
         self.assertEqual(result["matched_product"], "星云降噪耳机 Pro")
         self.assertEqual(result["reply"], MODEL_REPLY)
-        self.assertEqual(result["source"], "astrbot")
+        self.assertEqual(result["source"], "native")
         self.assertNotIn("aliases", result["matched_products"][0])
         self.assertNotIn("fallback_notice", result)
 
@@ -58,10 +38,10 @@ class WorkflowAnalysisTests(unittest.TestCase):
         message = "The headset arrived damaged. I want a refund."
         analysis = analyze_message(message)
         result = build_workflow_answer(
-            message, analysis, reply=MODEL_REPLY, source="astrbot+human-handoff"
+            message, analysis, reply=MODEL_REPLY, source="native+human-handoff"
         )
         self.assertTrue(result["needs_human"])
-        self.assertEqual(result["source"], "astrbot+human-handoff")
+        self.assertEqual(result["source"], "native+human-handoff")
         self.assertIn("人工接管", result["steps"][-1])
 
 
@@ -91,76 +71,6 @@ class WorkflowArchiveTests(unittest.TestCase):
             self.assertTrue(after_restart.recent()[0]["human_acknowledged"])
             first_run.close()
             after_restart.close()
-
-
-class AstrBotIntegrationTests(unittest.TestCase):
-    def test_sse_plain_and_complete_events_are_aggregated_once(self):
-        body = (
-            'data: {"type":"plain","data":"hello ","streaming":true}\n\n'
-            'data: {"type":"plain","data":"world","streaming":true}\n\n'
-            'data: {"type":"complete","data":"hello world","streaming":true}\n\n'
-        )
-        self.assertEqual(_parse_sse_response(body)["data"], "hello world")
-
-    def test_model_reply_is_used_and_archived(self):
-        class ConfiguredAstrBot:
-            is_configured = True
-
-            async def send_chat(self, _payload):
-                return {"status": "ok", "data": MODEL_REPLY, "message": None}
-
-        result, snapshot = run_chat(ConfiguredAstrBot())
-        self.assertEqual(result["data"]["reply"], MODEL_REPLY)
-        self.assertEqual(result["data"]["source"], "astrbot")
-        self.assertEqual(snapshot["total_conversations"], 1)
-
-    def test_missing_api_key_raises_error(self):
-        class UnconfiguredAstrBot:
-            is_configured = False
-
-            async def send_chat(self, _payload):
-                raise AssertionError("send_chat must not be called without a key")
-
-        with self.assertRaises(AstrBotError) as context:
-            run_chat(UnconfiguredAstrBot())
-        self.assertIn("API Key", str(context.exception))
-
-    def test_provider_unavailable_raises_error(self):
-        class NoProviderAstrBot:
-            is_configured = True
-
-            async def send_chat(self, _payload):
-                return {
-                    "status": "ok",
-                    "data": "未找到任何可用的对话模型，请先配置模型提供商",
-                    "message": None,
-                }
-
-        with self.assertRaises(AstrBotError) as context:
-            run_chat(NoProviderAstrBot())
-        self.assertIn("对话模型", str(context.exception))
-
-    def test_transport_error_is_not_masked(self):
-        class BrokenAstrBot:
-            is_configured = True
-
-            async def send_chat(self, _payload):
-                raise AstrBotError("无法连接 AstrBot 服务")
-
-        with self.assertRaises(AstrBotError) as context:
-            run_chat(BrokenAstrBot())
-        self.assertIn("无法连接", str(context.exception))
-
-    def test_error_envelope_raises_error(self):
-        class ErrorAstrBot:
-            is_configured = True
-
-            async def send_chat(self, _payload):
-                return {"status": "error", "data": None, "message": "模型调用失败"}
-
-        with self.assertRaises(AstrBotError) as context:
-            run_chat(ErrorAstrBot())
-        self.assertIn("模型调用失败", str(context.exception))
 
 
 if __name__ == "__main__":
