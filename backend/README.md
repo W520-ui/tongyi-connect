@@ -4,29 +4,30 @@
 
 ## 环境要求
 
-- Python 3.11 或更新版本
+- Python ≥ 3.11；本项目的 Windows 开发环境和 CI 使用 uv 管理的 Python 3.12。
+- uv（当前锁文件和 CI 使用 0.8.0）。Windows 默认 `python` 可能仍是 3.10，不要直接用它创建环境。
 
 ## 本地运行
 
 在 `backend/` 目录下执行：
 
-```bash
-python -m venv .venv
-```
-
-Windows PowerShell 激活虚拟环境：
-
 ```powershell
-.\.venv\Scripts\Activate.ps1
+uv venv --python 3.12 --managed-python .venv
+uv pip install -e ".[dev]"
+uv lock --check
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+uv run --extra dev uvicorn app.main:app --reload
 ```
 
-安装项目依赖并启动开发服务：
+`.venv` 必须放在 `backend/.venv`，根目录的 `scripts/dev-all.mjs` 会使用这个路径。无需激活虚拟环境，后续命令通过 `uv run` 执行。
+
+需要严格按提交的锁文件安装时（CI 使用此方式）：
 
 ```bash
-python -m pip install -e .
-Copy-Item .env.example .env
-uvicorn app.main:app --reload
+uv sync --frozen --extra dev
 ```
+
+只有有意修改依赖时才执行 `uv lock`，并将 `pyproject.toml` 与 `uv.lock` 一起提交。
 
 服务默认运行在 `http://127.0.0.1:8000`。开发模式下可在 `/docs` 查看 API 文档，健康检查地址为 `/api/v1/health`。
 
@@ -95,11 +96,48 @@ AGENT_MAX_HISTORY_TURNS=10
 
 模型连接建立超时为 5 秒，避免服务未启动时等待过久；模型生成仍使用完整的超时时间。
 
+第 0 阶段新增 `WORKFLOW_DB_PATH` 环境变量，用于同时配置咨询归档和会话数据库。默认仍是 `backend/data/workflow.db`；相对路径以 `backend/` 为基准，绝对路径按原样使用。后续统一数据模型时再引入 `DATABASE_URL`。
+
+```dotenv
+WORKFLOW_DB_PATH=data/workflow.db
+```
+
+测试在导入应用之前就把数据库路径指向临时目录，每个测试运行时另用自己的临时数据库，不读取或写入真实的 `backend/data/`。测试模型是脚本化假模型，不调用真实上游。
+
 ## 测试
 
 ```bash
-python -m unittest discover -s tests -v
+uv run --extra dev ruff check .
+uv run --extra dev ruff format --check .
+uv run --extra dev pytest
 ```
+
+原有 unittest 用例也由 pytest 一并执行；仍可单独运行：
+
+```bash
+uv run --extra dev python -m unittest discover -s tests -v
+```
+
+接口测试冻结 `AgentWorkflowData` 的 18 个现有字段及类型，允许后续增加字段。`tests/test_known_defects.py` 覆盖说明中的缺陷 1–12，使用 `xfail(strict=True, raises=AssertionError)`：预期失败表示缺陷已复现，意外通过或非断言异常都必须处理。第 1 阶段修复 1–11，第 2 阶段修复 12；不能通过删掉断言或放宽标记来通过验收。
+
+演示流程的 API 冒烟测试：
+
+```bash
+uv run --extra dev pytest tests/test_demo_smoke.py -v
+```
+
+CI 分为后端和前端两个独立任务；前端在仓库根目录执行 `npm ci`、`npm run build`。
+
+## 真实模型手动验证
+
+自动化测试只验证脚本化模型下的接口和数据流程，不代表真实模型效果已经验证。手动验证前在后端 `.env` 填好可用的 `AGENT_LLM_BASE_URL`、`AGENT_LLM_MODEL`、`AGENT_LLM_API_KEY`，密钥只留在后端。按上面的命令安装后端依赖，再在主 worktree 根目录执行 `npm ci`、`npm run dev`，打开 `http://127.0.0.1:5173/`。
+
+1. 工作台发送“请用英文回复：星云降噪耳机 Pro 支持发往西班牙吗？”，确认商品为星云耳机、物流意图被识别、对客回复为英文，时效与商品资料的 5–8 个工作日一致。
+2. 在同一会话发送“那它的物流要多久？”，确认沿用耳机商品上下文，回复没有改成其他商品的时效。
+3. 发送“客户说耳机收到后无法开机，帮我登记售后”，确认出现人工接管记录；点击“确认接管”，确认待处理队列减少、归档标记已接管。
+4. 检查看板咨询累计增加 3、人工接管累计增加 1、待处理回到发送前的数量；意图分布、语言分布和最近归档应体现这三条消息，再在设置页检查后端健康状态。
+
+第 0 阶段只建立安全网，已知缺陷仍保留。真实模型验证时不要把尚未修复的中文摘要翻译、语言偏好持久化或接管后暂停行为当作已完成能力。阶段验收及提交记录见 `PHASE_0.md`。
 
 ## 目录结构
 
