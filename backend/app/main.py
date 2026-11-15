@@ -18,6 +18,7 @@ async def lifespan(_app: FastAPI):
     metrics.close()
     get_agent_engine().close()
 
+
 logging.basicConfig(
     level=settings.log_level.upper(),
     format="%(asctime)s %(levelname)s %(name)s %(message)s",

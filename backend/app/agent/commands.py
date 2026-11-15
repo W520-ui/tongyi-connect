@@ -29,9 +29,7 @@ class CommandRouter:
             return None
         return name, args.strip()
 
-    async def handle(
-        self, name: str, args: str, ctx: AgentContext
-    ) -> CommandResult | None:
+    async def handle(self, name: str, args: str, ctx: AgentContext) -> CommandResult | None:
         if name in {"help", "帮助"}:
             return CommandResult(reply=HELP_TEXT)
         if name in {"reset", "清空"}:
@@ -39,9 +37,7 @@ class CommandRouter:
             ctx.session.turns.clear()
             ctx.session.last_product_id = None
             ctx.session.language = None
-            return CommandResult(
-                reply="当前会话已清空，可以重新开始咨询。", persist=False
-            )
+            return CommandResult(reply="当前会话已清空，可以重新开始咨询。", persist=False)
         if name in {"lang", "language"}:
             if not args:
                 return CommandResult(reply="用法：/lang zh-CN、/lang en-US 或 /lang es-ES")

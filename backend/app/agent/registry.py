@@ -48,9 +48,7 @@ class ToolRegistry:
     def names(self) -> list[str]:
         return list(self._tools)
 
-    async def invoke(
-        self, name: str, args: dict[str, Any], ctx: AgentContext
-    ) -> ToolResult:
+    async def invoke(self, name: str, args: dict[str, Any], ctx: AgentContext) -> ToolResult:
         spec = self._tools.get(name)
         if spec is None:
             raise AgentError(f"模型调用了未注册的工具：{name}")

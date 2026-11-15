@@ -161,9 +161,7 @@ class AgentEngine:
             handoff_reason=handoff_reason,
         )
 
-    def _build_messages(
-        self, request: AgentChatRequest, ctx: AgentContext
-    ) -> list[Message]:
+    def _build_messages(self, request: AgentChatRequest, ctx: AgentContext) -> list[Message]:
         messages = [Message(role="system", content=build_system_prompt(ctx))]
         for turn in ctx.session.turns[-self.settings.max_history_turns :]:
             messages.append(Message(role=turn.role, content=turn.content))
@@ -194,23 +192,13 @@ class AgentEngine:
         session.language = ctx.language_override or analysis.language
         if persist:
             now = datetime.now(UTC).isoformat()
-            self.store.append(
-                session, Turn(role="user", content=request.message, created_at=now)
-            )
-            self.store.append(
-                session, Turn(role="assistant", content=reply, created_at=now)
-            )
+            self.store.append(session, Turn(role="user", content=request.message, created_at=now))
+            self.store.append(session, Turn(role="assistant", content=reply, created_at=now))
 
         source = "native+human-handoff" if analysis.needs_human else "native"
-        workflow = build_workflow_answer(
-            request.message, analysis, reply=reply, source=source
-        )
-        metrics.archive(
-            session_id=ctx.session_id, message=request.message, answer=workflow
-        )
-        self.hooks.emit(
-            "on_reply", {"session_id": ctx.session_id, "source": source}
-        )
+        workflow = build_workflow_answer(request.message, analysis, reply=reply, source=source)
+        metrics.archive(session_id=ctx.session_id, message=request.message, answer=workflow)
+        self.hooks.emit("on_reply", {"session_id": ctx.session_id, "source": source})
         if analysis.needs_human:
             self.hooks.emit(
                 "on_handoff",

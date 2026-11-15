@@ -79,11 +79,7 @@ def make_engine(provider, temp_dir):
 def run_engine(engine, metrics, message, session_id="test-session"):
     with patch("app.agent.engine.metrics", metrics):
         return asyncio.run(
-            engine.chat(
-                AgentChatRequest(
-                    message=message, session_id=session_id, username="tester"
-                )
-            )
+            engine.chat(AgentChatRequest(message=message, session_id=session_id, username="tester"))
         )
 
 
@@ -112,9 +108,7 @@ class AgentEngineTests(unittest.TestCase):
             self.assertEqual(data["source"], "native")
             self.assertEqual(data["matched_product"], "星云降噪耳机 Pro")
             self.assertEqual(len(provider.calls), 2)
-            tool_names = [
-                item["function"]["name"] for item in provider.calls[0]["tools"]
-            ]
+            tool_names = [item["function"]["name"] for item in provider.calls[0]["tools"]]
             self.assertIn("catalog_search", tool_names)
             self.assertTrue(
                 any(message.role == "tool" for message in provider.calls[1]["messages"])
@@ -157,9 +151,7 @@ class AgentEngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             engine, metrics, store = make_engine(provider, temp_dir)
             run_engine(engine, metrics, "Please quote the headphones", "s3")
-            result = run_engine(
-                engine, metrics, "And how long is the delivery time?", "s3"
-            )
+            result = run_engine(engine, metrics, "And how long is the delivery time?", "s3")
             self.assertEqual(result["data"]["matched_product"], "星云降噪耳机 Pro")
             self.assertEqual(result["data"]["product_confidence"], 0.72)
             store.close()

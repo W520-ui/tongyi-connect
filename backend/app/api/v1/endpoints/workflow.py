@@ -40,4 +40,3 @@ async def dashboard_handoffs(limit: int = Query(default=20, ge=1, le=50)) -> dic
     """Return unresolved conversations that require a merchant follow-up."""
 
     return {"status": "ok", "data": metrics.recent_handoffs(limit)}
-

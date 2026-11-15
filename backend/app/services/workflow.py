@@ -219,12 +219,18 @@ class WorkflowMetrics:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                record["id"], record["created_at"], record["session_id"],
-                record["message"], record["reply"], record["merchant_summary"],
-                record["intent"], record["intent_label"],
+                record["id"],
+                record["created_at"],
+                record["session_id"],
+                record["message"],
+                record["reply"],
+                record["merchant_summary"],
+                record["intent"],
+                record["intent_label"],
                 json.dumps(record["detected_intents"], ensure_ascii=False),
                 record["product_id"],
-                record["language"], record["language_label"],
+                record["language"],
+                record["language_label"],
                 int(record["needs_human"]),
                 int(record["human_acknowledged"]),
             ),
@@ -240,9 +246,16 @@ class WorkflowMetrics:
             **{
                 key: record[key]
                 for key in (
-                "id", "created_at", "session_id", "message", "reply",
-                "merchant_summary", "intent_label", "language_label", "needs_human",
-                "human_acknowledged",
+                    "id",
+                    "created_at",
+                    "session_id",
+                    "message",
+                    "reply",
+                    "merchant_summary",
+                    "intent_label",
+                    "language_label",
+                    "needs_human",
+                    "human_acknowledged",
                 )
             },
             "needs_human": bool(record["needs_human"]),
@@ -359,11 +372,7 @@ def list_products() -> list[dict[str, Any]]:
     """Return catalog data safe for the browser and model context."""
 
     return [
-        {
-            key: value
-            for key, value in product.items()
-            if key not in {"aliases"}
-        }
+        {key: value for key, value in product.items() if key not in {"aliases"}}
         for product in PRODUCTS
     ]
 
@@ -434,7 +443,9 @@ def build_workflow_answer(
         "product_id": analysis.product["id"] if analysis.product else None,
         "matched_products": [
             {key: value for key, value in analysis.product.items() if key != "aliases"}
-        ] if analysis.product else [],
+        ]
+        if analysis.product
+        else [],
         "needs_human": analysis.needs_human,
         "handoff_reason": analysis.handoff_reason,
         "steps": steps,
@@ -454,8 +465,16 @@ def _detect_language(message: str) -> str:
     if any(
         token in lower
         for token in (
-            "qué ", "precio", "cuánto", "cuanto", "envío", "entrega",
-            "hola", "por favor", "gracias", "puede enviar",
+            "qué ",
+            "precio",
+            "cuánto",
+            "cuanto",
+            "envío",
+            "entrega",
+            "hola",
+            "por favor",
+            "gracias",
+            "puede enviar",
         )
     ):
         return "es-ES"
@@ -466,26 +485,75 @@ def _detect_intent(message: str) -> tuple[Intent, float]:
     rules: list[tuple[Intent, tuple[str, ...], float]] = [
         (
             "after_sales",
-            ("售后", "退款", "退货", "换货", "投诉", "坏了", "refund", "return", "warranty",
-             "damaged", "complaint"),
+            (
+                "售后",
+                "退款",
+                "退货",
+                "换货",
+                "投诉",
+                "坏了",
+                "refund",
+                "return",
+                "warranty",
+                "damaged",
+                "complaint",
+            ),
             0.97,
         ),
         (
             "logistics",
-            ("物流", "快递", "运费", "发货", "发往", "寄到", "寄往", "送到", "配送", "邮寄", "到货",
-             "shipping", "delivery", "tracking", "ship to", "arrive", "enviar"),
+            (
+                "物流",
+                "快递",
+                "运费",
+                "发货",
+                "发往",
+                "寄到",
+                "寄往",
+                "送到",
+                "配送",
+                "邮寄",
+                "到货",
+                "shipping",
+                "delivery",
+                "tracking",
+                "ship to",
+                "arrive",
+                "enviar",
+            ),
             0.94,
         ),
         (
             "quote",
-            ("价格", "多少钱", "报价", "批发", "折扣", "price", "cost", "quote", "discount",
-             "how much"),
+            (
+                "价格",
+                "多少钱",
+                "报价",
+                "批发",
+                "折扣",
+                "price",
+                "cost",
+                "quote",
+                "discount",
+                "how much",
+            ),
             0.93,
         ),
         (
             "specs",
-            ("参数", "规格", "尺寸", "重量", "材质", "续航", "spec", "size", "weight", "material",
-             "battery"),
+            (
+                "参数",
+                "规格",
+                "尺寸",
+                "重量",
+                "材质",
+                "续航",
+                "spec",
+                "size",
+                "weight",
+                "material",
+                "battery",
+            ),
             0.9,
         ),
     ]
@@ -499,23 +567,72 @@ def _detect_all_intents(message: str) -> list[Intent]:
     rules: list[tuple[Intent, tuple[str, ...]]] = [
         (
             "after_sales",
-            ("售后", "退款", "退货", "换货", "投诉", "坏了", "refund", "return", "warranty",
-             "damaged", "complaint"),
+            (
+                "售后",
+                "退款",
+                "退货",
+                "换货",
+                "投诉",
+                "坏了",
+                "refund",
+                "return",
+                "warranty",
+                "damaged",
+                "complaint",
+            ),
         ),
         (
             "logistics",
-            ("物流", "快递", "运费", "发货", "发往", "寄到", "寄往", "送到", "配送", "邮寄", "到货",
-             "shipping", "delivery", "tracking", "ship to", "arrive", "enviar"),
+            (
+                "物流",
+                "快递",
+                "运费",
+                "发货",
+                "发往",
+                "寄到",
+                "寄往",
+                "送到",
+                "配送",
+                "邮寄",
+                "到货",
+                "shipping",
+                "delivery",
+                "tracking",
+                "ship to",
+                "arrive",
+                "enviar",
+            ),
         ),
         (
             "quote",
-            ("价格", "多少钱", "报价", "批发", "折扣", "price", "cost", "quote", "discount",
-             "how much"),
+            (
+                "价格",
+                "多少钱",
+                "报价",
+                "批发",
+                "折扣",
+                "price",
+                "cost",
+                "quote",
+                "discount",
+                "how much",
+            ),
         ),
         (
             "specs",
-            ("参数", "规格", "尺寸", "重量", "材质", "续航", "spec", "size", "weight", "material",
-             "battery"),
+            (
+                "参数",
+                "规格",
+                "尺寸",
+                "重量",
+                "材质",
+                "续航",
+                "spec",
+                "size",
+                "weight",
+                "material",
+                "battery",
+            ),
         ),
     ]
     detected = [

@@ -23,9 +23,7 @@ class OpenAICompatibleProvider:
     def is_configured(self) -> bool:
         return self.settings.is_configured
 
-    async def decide(
-        self, messages: list[Message], tools: list[dict[str, Any]]
-    ) -> Decision:
+    async def decide(self, messages: list[Message], tools: list[dict[str, Any]]) -> Decision:
         if not self.is_configured:
             raise AgentError("尚未配置 AGENT_LLM_API_KEY，无法生成回复")
 
@@ -53,9 +51,7 @@ class OpenAICompatibleProvider:
             raise AgentError("无法连接模型服务") from exc
 
         if response.status_code >= 400:
-            raise AgentError(
-                f"模型返回错误：{_response_detail(response)}", status_code=502
-            )
+            raise AgentError(f"模型返回错误：{_response_detail(response)}", status_code=502)
         try:
             body = response.json()
         except ValueError as exc:
@@ -106,9 +102,7 @@ def _parse_decision(body: dict[str, Any]) -> Decision:
     if isinstance(content, str) and content.strip():
         return Decision(reply=content.strip())
     if isinstance(content, list):
-        text = "".join(
-            part.get("text", "") for part in content if isinstance(part, dict)
-        )
+        text = "".join(part.get("text", "") for part in content if isinstance(part, dict))
         if text.strip():
             return Decision(reply=text.strip())
     raise AgentError("模型返回了空回复")
