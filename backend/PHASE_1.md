@@ -17,7 +17,7 @@
 - **工具与运行器：** 五个 Pydantic 工具、ToolOutput 与类型化 effects，移除无数据源的 knowledge_search。异步事件运行器不写数据库；每轮完整 schema、最后一轮 tool_choice=none；坏 JSON/参数、未知工具、工具异常/超时回传失败结果。同轮 gather 并发，完成事件和 steps 反映实际顺序；处理流式 index 片段、总时限、取消清理、长度截断和 token 累计。
 - **模型与资源：** 唯一 Settings，backend 锚定 .env；SecretStr、共享 httpx.AsyncClient、可配置温度/输出上限、最多两次重试与 Retry-After。单调用与总时限有不同错误码，连接超时重试耗尽仍为 LLM_TIMEOUT。上游诊断写日志并遮蔽密钥，对浏览器返回中文通用消息。全部业务资源在 lifespan 创建和关闭，删除缓存引擎与进程内 metrics 单例。
 - **仓储与服务：** 旧 SQLite 会话/归档访问移到 repositories；添加原因、issue_summary、槽位、指令和工单创建标记及完整轨迹，持久化失败计数。AnalyticsService 用 SQL 实时聚合，同一读事务形成看板快照。ConversationService.handle_inbound 统一处理消息和应用 effects；坏旧历史 JSON 保持可恢复。
-- **HTTP 与提前交付：** HTTP 模型统一放在 api/v1/schemas，卡片在 presenters。旧请求字段、成功信封和工作流原有 18 字段不变，只增加 session_id/trace、最近归档 conversation_id。交付 GET /api/v1/status 与离线 OpenAPI 导出。
+- **HTTP 与提前交付：** HTTP 模型统一放在 api/v1/schemas，卡片在 presenters。旧请求字段、成功信封和工作流原有 18 字段不变，增加 session_id/trace。交付 GET /api/v1/status 与离线 OpenAPI 导出。更正：第 1 阶段并未给最近归档增加 conversation_id；先前记录有误，第 2 阶段按附录 A.6 补齐。
 - **工程与测试：** .gitignore 清理 AstrBot 残留，忽略生成的 backend/openapi.json；打包包含种子与提示词，无新增依赖。保留并迁移原测试验证意图，缺陷 1–11 去掉 xfail，仅缺陷 12 保留。增加运行器、重试、生命周期、无资源构造导入、AST 依赖合约及导出测试。
 - **用户追加项：** Mars 回归同时检查传给模型的工具结果 ok=false、TOOL_VALIDATION_ERROR、非空错误消息以及 HTTP trace 失败状态；unconfirmed 结果不能通过。CI 前端 build 后增加可选 test，旧前端无脚本时跳过。
 
@@ -79,7 +79,7 @@ Windows 测试输出前设置 `$env:PYTHONIOENCODING = 'utf-8'`。唯一预期�
 ## 4. TODO(owner) 与待决定问题
 
 - **D2 已有事项，现写入种子规则：** 确认真实可配送范围；当前仅 ES 为已知演示规则，不扩展国家、不增加价格或退款政策。
-- **新增协调事项：** 更新根 README 的旧 Agent/工作流模块说明。该文件不归后端工作范围，需负责人协调维护。
+- **已撤销的协调事项：** 用户明确指定根 README 由 Claude 在前端分支统一更新，后端不再维护此 TODO。
 - 本阶段没有其他新增业务选择或需立即阻塞的问题。
 
 ## 5. 演示记录与手动步骤
