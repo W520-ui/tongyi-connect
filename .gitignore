@@ -39,3 +39,4 @@ backend/data/
 
 # Generated backend API schema
 backend/openapi.json
+backend/evals/results/
