@@ -8,7 +8,8 @@
 - Vite
 - Vue Router
 - Pinia
-- 原生 Fetch 请求封装
+- shadcn-vue（Reka UI + Tailwind CSS v4）+ lucide 图标 + Inter 字体
+- Vitest + Vue Test Utils（前端单元测试）
 - 后端：FastAPI + 自研进程内 Agent 运行时（Python 3.11+）
 
 ## 本地运行
@@ -30,16 +31,35 @@ npm run dev
 npm run build
 ```
 
+前端单元测试（运行在 jsdom 中，不需要启动后端）：
+
+```bash
+npm run test
+```
+
 ## 目录约定
+
+前端分成两个互相独立的页面：
+
+- 客户窗口 `/chat`：面向海外客户的聊天页，界面支持中文、英文、西班牙语；
+- 商家控制台 `/console`：收件箱、数据看板、商品资料、系统状态，支持深色模式。
 
 ```text
 src/
-├── layouts/       应用级布局
+├── api/           接口契约类型（docs/backend-prompt.md 附录 A）
+├── components/    ui/（shadcn-vue 组件）、chat/（客户窗口）、console/（商家控制台）
+├── fixtures/      视觉原型阶段的演示数据（接上模拟后端后删除）
+├── i18n/          客户窗口的三语文案
+├── layouts/       控制台布局
+├── pages/         页面入口
 ├── router/        路由配置
-├── services/      后端请求封装
 ├── stores/        Pinia 状态
-└── views/         页面入口
+├── lib/           工具函数（cn）
+├── style.css      Tailwind 入口与主题变量（浅色 / 深色）
+└── theme/         控制台深色模式开关
 ```
+
+单元测试放在被测代码旁边的 `__tests__/` 目录里，文件名以 `.spec.ts` 结尾。前端重写的计划和进度见 [`docs/frontend-plan.md`](docs/frontend-plan.md)。
 
 复制 `.env.example` 为 `.env.local` 后，可通过 `VITE_API_BASE_URL` 配置后端 API 地址。开发服务器会将 `/api` 请求代理到本地 FastAPI（`http://127.0.0.1:8000`）。
 
