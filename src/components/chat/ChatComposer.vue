@@ -1,22 +1,16 @@
 <script setup lang="ts">
-import { SendHorizontal } from 'lucide-vue-next'
-import { NButton, NIcon, NInput } from 'naive-ui'
+import { ArrowUp } from '@lucide/vue'
 import { computed, ref } from 'vue'
 
-import type { CustomerStrings } from '../../i18n/customer'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import type { CustomerStrings } from '@/i18n/customer'
 
 const props = defineProps<{ strings: CustomerStrings; disabled?: boolean }>()
 const emit = defineEmits<{ send: [text: string] }>()
 
 const text = ref('')
 const canSend = computed(() => text.value.trim().length > 0 && !props.disabled)
-
-const inputTheme = {
-  color: 'transparent',
-  colorFocus: 'transparent',
-  boxShadowFocus: 'none',
-  fontSizeMedium: '14.5px',
-}
 
 function submit() {
   if (!canSend.value) return
@@ -34,54 +28,23 @@ function onKeydown(event: KeyboardEvent) {
 </script>
 
 <template>
-  <form class="composer" @submit.prevent="submit">
-    <div class="field">
-      <NInput
-        v-model:value="text"
-        type="textarea"
-        :autosize="{ minRows: 1, maxRows: 5 }"
-        :bordered="false"
+  <form class="border-t px-4 pt-3 pb-2.5 sm:px-5" @submit.prevent="submit">
+    <div
+      class="flex items-end gap-2 rounded-xl border bg-background py-1.5 pr-1.5 pl-3 transition-[color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50"
+    >
+      <Textarea
+        :model-value="text"
+        rows="1"
         :maxlength="20000"
         :placeholder="strings.placeholder"
-        :theme-overrides="inputTheme"
+        class="max-h-36 min-h-9 resize-none border-0 bg-transparent px-0 py-2 shadow-none focus-visible:ring-0 dark:bg-transparent"
+        @update:model-value="(value) => (text = String(value))"
         @keydown="onKeydown"
       />
-      <NButton type="primary" circle attr-type="submit" :disabled="!canSend" :aria-label="strings.send">
-        <template #icon><NIcon :component="SendHorizontal" /></template>
-      </NButton>
+      <Button type="submit" size="icon-sm" :disabled="!canSend" :aria-label="strings.send">
+        <ArrowUp />
+      </Button>
     </div>
-    <p class="hint">{{ strings.hint }}</p>
+    <p class="mt-2 px-1 text-[11px] text-muted-foreground">{{ strings.hint }}</p>
   </form>
 </template>
-
-<style scoped>
-.composer {
-  padding: 14px 18px 12px;
-  border-top: 1px solid var(--line);
-  background: var(--surface);
-}
-
-.field {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 6px 6px 6px 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: 18px;
-  background: var(--surface);
-  transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
-}
-
-.field:focus-within {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 4px var(--brand-ring);
-}
-
-.hint {
-  margin: 8px 4px 0;
-  color: var(--text-faint);
-  font-size: 11.5px;
-}
-</style>

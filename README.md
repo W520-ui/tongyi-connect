@@ -8,7 +8,7 @@
 - Vite
 - Vue Router
 - Pinia
-- Naive UI（组件库，自定义浅色 / 深色主题）+ lucide 图标 + Inter 字体
+- shadcn-vue（Reka UI + Tailwind CSS v4）+ lucide 图标 + Inter 字体
 - Vitest + Vue Test Utils（前端单元测试）
 - 后端：FastAPI + 自研进程内 Agent 运行时（Python 3.11+）
 
@@ -47,15 +47,16 @@ npm run test
 ```text
 src/
 ├── api/           接口契约类型（docs/backend-prompt.md 附录 A）
-├── components/    chat/（客户窗口）、console/（商家控制台）
+├── components/    ui/（shadcn-vue 组件）、chat/（客户窗口）、console/（商家控制台）
 ├── fixtures/      视觉原型阶段的演示数据（接上模拟后端后删除）
 ├── i18n/          客户窗口的三语文案
 ├── layouts/       控制台布局
 ├── pages/         页面入口
 ├── router/        路由配置
 ├── stores/        Pinia 状态
-├── styles/        全局样式与设计变量
-└── theme/         Naive UI 主题
+├── lib/           工具函数（cn）
+├── style.css      Tailwind 入口与主题变量（浅色 / 深色）
+└── theme/         控制台深色模式开关
 ```
 
 单元测试放在被测代码旁边的 `__tests__/` 目录里，文件名以 `.spec.ts` 结尾。前端重写的计划和进度见 [`docs/frontend-plan.md`](docs/frontend-plan.md)。

@@ -1,35 +1,27 @@
 <script setup lang="ts">
-import { NConfigProvider, NGlobalStyle, NMessageProvider, dateEnUS, dateZhCN, enUS, zhCN } from 'naive-ui'
 import { computed, watchEffect } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 
-import { themeFor, useThemeMode } from './theme'
+import { Toaster } from '@/components/ui/sonner'
+import { TooltipProvider } from '@/components/ui/tooltip'
+import { useConsoleTheme } from '@/theme'
 
 const route = useRoute()
-const { isDark } = useThemeMode()
+const { isDark } = useConsoleTheme()
 
 // Only the merchant console follows the dark-mode switch; the customer page stays light.
 const isConsole = computed(() => route.path.startsWith('/console'))
 const dark = computed(() => isConsole.value && isDark.value)
-const themeConfig = computed(() => themeFor(dark.value))
-const locale = computed(() => (isConsole.value ? zhCN : enUS))
-const dateLocale = computed(() => (isConsole.value ? dateZhCN : dateEnUS))
 
 watchEffect(() => {
-  document.documentElement.dataset.theme = dark.value ? 'dark' : 'light'
+  document.documentElement.classList.toggle('dark', dark.value)
+  document.documentElement.lang = isConsole.value ? 'zh-CN' : 'en'
 })
 </script>
 
 <template>
-  <NConfigProvider
-    :theme="themeConfig.theme"
-    :theme-overrides="themeConfig.overrides"
-    :locale="locale"
-    :date-locale="dateLocale"
-  >
-    <NGlobalStyle />
-    <NMessageProvider>
-      <RouterView />
-    </NMessageProvider>
-  </NConfigProvider>
+  <TooltipProvider :delay-duration="250">
+    <RouterView />
+  </TooltipProvider>
+  <Toaster position="top-center" :theme="dark ? 'dark' : 'light'" />
 </template>

@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { CupSoda, Headphones, Lamp, Package, Truck } from 'lucide-vue-next'
-import { NIcon } from 'naive-ui'
+import { CupSoda, Headphones, Lamp, Package, Truck } from '@lucide/vue'
 import { computed, type Component } from 'vue'
 
-import type { Language, Product } from '../../api/types'
-import type { CustomerStrings } from '../../i18n/customer'
-import { dayRange } from '../../utils/time'
+import type { Language, Product } from '@/api/types'
+import type { CustomerStrings } from '@/i18n/customer'
+import { dayRange } from '@/utils/time'
 
 const props = defineProps<{ product: Product; locale: Language; strings: CustomerStrings }>()
 
@@ -27,71 +26,17 @@ const price = computed(() =>
 </script>
 
 <template>
-  <article class="product">
-    <div class="product-icon" aria-hidden="true"><NIcon :size="20" :component="icon" /></div>
-    <div class="product-copy">
-      <strong>{{ name }}</strong>
-      <span>
-        <NIcon :size="13" :component="Truck" aria-hidden="true" />
-        {{ shipping }} · {{ strings.inStock(product.stock) }}
-      </span>
+  <article class="flex w-full max-w-md items-center gap-3 rounded-xl border bg-background p-2.5 pr-3.5">
+    <div class="grid size-10 shrink-0 place-items-center rounded-lg bg-muted text-foreground" aria-hidden="true">
+      <component :is="icon" class="size-5" />
     </div>
-    <div class="price">{{ price }}</div>
+    <div class="min-w-0 flex-1">
+      <p class="truncate text-[13px] font-medium">{{ name }}</p>
+      <p class="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+        <Truck class="size-3.5 shrink-0" aria-hidden="true" />
+        <span class="truncate">{{ shipping }} · {{ strings.inStock(product.stock) }}</span>
+      </p>
+    </div>
+    <p class="text-sm font-semibold tabular-nums">{{ price }}</p>
   </article>
 </template>
-
-<style scoped>
-.product {
-  display: flex;
-  width: min(420px, 100%);
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px 10px 10px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--surface);
-  box-shadow: 0 6px 18px -14px rgba(15, 23, 42, 0.35);
-}
-
-.product-icon {
-  display: grid;
-  width: 42px;
-  height: 42px;
-  flex: 0 0 auto;
-  place-items: center;
-  border-radius: 12px;
-  color: var(--brand);
-  background: linear-gradient(140deg, #ecfdf5 0%, #e0f2fe 100%);
-}
-
-.product-copy {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.product-copy strong {
-  overflow: hidden;
-  color: var(--text-strong);
-  font-size: 13.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.product-copy span {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.price {
-  color: var(--text-strong);
-  font-size: 15px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-}
-</style>

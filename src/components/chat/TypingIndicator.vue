@@ -1,70 +1,21 @@
 <script setup lang="ts">
-import { Bot } from 'lucide-vue-next'
-import { NIcon } from 'naive-ui'
+import { Bot } from '@lucide/vue'
 
 defineProps<{ label: string }>()
 </script>
 
 <template>
-  <div class="typing" role="status">
-    <div class="avatar" aria-hidden="true"><NIcon :size="16" :component="Bot" /></div>
-    <div class="dots" :aria-label="label"><i /><i /><i /></div>
+  <div class="flex items-center gap-2.5" role="status" :aria-label="label">
+    <div class="grid size-7 shrink-0 place-items-center rounded-full border bg-background text-muted-foreground">
+      <Bot class="size-4" aria-hidden="true" />
+    </div>
+    <div class="flex items-center gap-1 rounded-2xl rounded-bl-md bg-muted px-4 py-3.5">
+      <span
+        v-for="dot in 3"
+        :key="dot"
+        class="size-1.5 animate-bounce rounded-full bg-muted-foreground/60"
+        :style="{ animationDelay: `${(dot - 1) * 150}ms` }"
+      />
+    </div>
   </div>
 </template>
-
-<style scoped>
-.typing {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.avatar {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  border: 1px solid rgba(15, 118, 110, 0.14);
-  border-radius: 50%;
-  color: var(--brand);
-  background: var(--brand-soft);
-}
-
-.dots {
-  display: inline-flex;
-  gap: 5px;
-  padding: 14px 16px;
-  border-radius: 18px 18px 18px 6px;
-  background: #f1f5f4;
-}
-
-.dots i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #94a3b8;
-  animation: bounce 1.2s ease-in-out infinite;
-}
-
-.dots i:nth-child(2) {
-  animation-delay: 0.15s;
-}
-
-.dots i:nth-child(3) {
-  animation-delay: 0.3s;
-}
-
-@keyframes bounce {
-  0%,
-  60%,
-  100% {
-    opacity: 0.45;
-    transform: translateY(0);
-  }
-
-  30% {
-    opacity: 1;
-    transform: translateY(-4px);
-  }
-}
-</style>

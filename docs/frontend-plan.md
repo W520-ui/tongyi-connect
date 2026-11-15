@@ -9,8 +9,9 @@
 | 方面 | 选择 | 理由 |
 |---|---|---|
 | 框架 | Vue 3 + TypeScript + Vite + Vue Router + Pinia | 沿用现有技术栈 |
-| 组件库 | Naive UI 2.45 | Vue 3 原生、TypeScript 友好、主题可整套定制、自带深色模式；表格、抽屉、消息提示齐全 |
-| 图标 | lucide-vue-next | 线条统一、仍在维护；Naive UI 文档常配的 @vicons 已停更 |
+| 组件库 | shadcn-vue（Reka UI + Tailwind CSS v4，经典 vega 风格，中性灰底） | 负责人认为 Naive UI 太常见，要现代风格、不用渐变。shadcn-vue 的组件代码放在我们自己的仓库里，外观完全可控 |
+| 视觉 | 纯色、细边框、基本不用阴影；主按钮近黑色；品牌青绿只用于标志、状态点等少数点缀 | 2026-11-14 负责人确认效果图 |
+| 图标 | lucide-vue-next | 线条统一、仍在维护 |
 | 字体 | Inter（@fontsource-variable，本地打包）+ 系统中文字体 | 不依赖外部 CDN |
 | 模拟后端 | Vite 开发服务器中间件，按附录 A 实现 | 不加运行时依赖，SSE 行为和真实后端一致；用 `vite --mode mock` 启动 |
 | 测试 | Vitest + Vue Test Utils + jsdom | F0 已搭好 |

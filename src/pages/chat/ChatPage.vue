@@ -1,16 +1,15 @@
 <script setup lang="ts">
-import { Headset } from 'lucide-vue-next'
-import { NIcon } from 'naive-ui'
+import { Headset } from '@lucide/vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
-import type { HistoryMessage, HistoryRole, Language, Product } from '../../api/types'
-import ChatComposer from '../../components/chat/ChatComposer.vue'
-import ChatHeader from '../../components/chat/ChatHeader.vue'
-import ChatMessage from '../../components/chat/ChatMessage.vue'
-import TypingIndicator from '../../components/chat/TypingIndicator.vue'
-import WelcomePanel from '../../components/chat/WelcomePanel.vue'
-import { customerChat, demoProducts } from '../../fixtures/demo'
-import { customerStrings } from '../../i18n/customer'
+import type { HistoryMessage, HistoryRole, Language, Product } from '@/api/types'
+import ChatComposer from '@/components/chat/ChatComposer.vue'
+import ChatHeader from '@/components/chat/ChatHeader.vue'
+import ChatMessage from '@/components/chat/ChatMessage.vue'
+import TypingIndicator from '@/components/chat/TypingIndicator.vue'
+import WelcomePanel from '@/components/chat/WelcomePanel.vue'
+import { customerChat, demoProducts } from '@/fixtures/demo'
+import { customerStrings } from '@/i18n/customer'
 
 // Prototype only: replies are simulated locally. Phase V2 swaps this for the
 // conversation store, the mock backend and real SSE streaming.
@@ -74,9 +73,8 @@ function later(callback: () => void, ms: number) {
 
 function makeMessage(role: HistoryRole, content: string, products: Product[] = []): HistoryMessage {
   seq += 1
-  const id = `local-${seq}`
   return {
-    id,
+    id: `local-${seq}`,
     seq,
     role,
     content,
@@ -126,9 +124,13 @@ function send(text: string) {
   }, 850)
 }
 
-function reset() {
+function clearTimers() {
   timers.forEach((id) => window.clearTimeout(id))
   timers.clear()
+}
+
+function reset() {
+  clearTimers()
   messages.value = []
   typing.value = false
   streamingId.value = null
@@ -136,12 +138,15 @@ function reset() {
 }
 
 onMounted(() => void scrollToEnd(false))
-onBeforeUnmount(() => timers.forEach((id) => window.clearTimeout(id)))
+onBeforeUnmount(clearTimers)
 </script>
 
 <template>
-  <div class="chat-page">
-    <section class="chat-shell" aria-label="Customer support chat">
+  <div class="flex min-h-svh flex-col items-center justify-center bg-muted/50 sm:p-6">
+    <section
+      class="flex h-svh w-full max-w-3xl flex-col overflow-hidden bg-background sm:h-[min(860px,calc(100svh-6rem))] sm:rounded-2xl sm:border"
+      aria-label="Customer support chat"
+    >
       <ChatHeader
         v-model:locale="locale"
         :strings="t"
@@ -150,17 +155,22 @@ onBeforeUnmount(() => timers.forEach((id) => window.clearTimeout(id)))
         @reset="reset"
       />
 
-      <Transition name="slide">
-        <div v-if="handedOff" class="handoff-banner" role="status">
-          <NIcon :size="18" :component="Headset" aria-hidden="true" />
-          <div>
-            <strong>{{ t.handoffTitle }}</strong>
-            <span>{{ t.handoffBody }}</span>
+      <Transition
+        enter-active-class="transition duration-200 ease-out"
+        enter-from-class="-translate-y-1 opacity-0"
+        leave-active-class="transition duration-150 ease-in"
+        leave-to-class="-translate-y-1 opacity-0"
+      >
+        <div v-if="handedOff" class="flex items-start gap-3 border-b bg-warning-soft px-5 py-3 text-warning" role="status">
+          <Headset class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          <div class="text-[13px] leading-relaxed">
+            <p class="font-medium">{{ t.handoffTitle }}</p>
+            <p>{{ t.handoffBody }}</p>
           </div>
         </div>
       </Transition>
 
-      <div ref="scroller" class="chat-body">
+      <div ref="scroller" class="flex flex-1 flex-col gap-5 overflow-y-auto px-4 py-6 [scrollbar-width:thin] sm:px-6">
         <WelcomePanel v-if="!messages.length" :strings="t" @pick="send" />
         <ChatMessage
           v-for="message in messages"
@@ -175,107 +185,6 @@ onBeforeUnmount(() => timers.forEach((id) => window.clearTimeout(id)))
 
       <ChatComposer :strings="t" :disabled="typing || Boolean(streamingId)" @send="send" />
     </section>
-    <p class="powered">{{ t.poweredBy }}</p>
+    <p class="mt-3 hidden text-xs text-muted-foreground sm:block">{{ t.poweredBy }}</p>
   </div>
 </template>
-
-<style scoped>
-.chat-page {
-  display: flex;
-  min-height: 100vh;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 28px 16px 18px;
-  background:
-    radial-gradient(900px 520px at 10% -10%, rgba(45, 212, 191, 0.26), transparent 62%),
-    radial-gradient(760px 480px at 108% 2%, rgba(99, 102, 241, 0.16), transparent 58%),
-    linear-gradient(180deg, #f8fafc 0%, #edf3f5 100%);
-}
-
-.chat-shell {
-  display: flex;
-  width: min(780px, 100%);
-  height: min(880px, calc(100vh - 92px));
-  min-height: 520px;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid rgba(15, 23, 42, 0.06);
-  border-radius: 26px;
-  background: var(--surface);
-  box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.04),
-    0 28px 70px -30px rgba(15, 23, 42, 0.32);
-}
-
-.handoff-banner {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 20px;
-  border-bottom: 1px solid rgba(217, 119, 6, 0.18);
-  color: #92400e;
-  background: linear-gradient(90deg, #fffbeb 0%, #fff7ed 100%);
-}
-
-.handoff-banner > div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 12.5px;
-  line-height: 1.55;
-}
-
-.handoff-banner strong {
-  font-size: 13.5px;
-}
-
-.chat-body {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 18px;
-  overflow-y: auto;
-  padding: 26px 22px;
-  scroll-behavior: smooth;
-  scrollbar-color: rgba(100, 116, 139, 0.35) transparent;
-  scrollbar-width: thin;
-}
-
-.powered {
-  margin: 14px 0 0;
-  color: var(--text-faint);
-  font-size: 12px;
-  letter-spacing: 0.01em;
-}
-
-.slide-enter-active,
-.slide-leave-active {
-  transition:
-    opacity 0.2s ease,
-    transform 0.2s ease;
-}
-
-.slide-enter-from,
-.slide-leave-to {
-  opacity: 0;
-  transform: translateY(-6px);
-}
-
-@media (max-width: 600px) {
-  .chat-page {
-    padding: 0;
-  }
-
-  .chat-shell {
-    height: 100vh;
-    min-height: 0;
-    border: 0;
-    border-radius: 0;
-  }
-
-  .powered {
-    display: none;
-  }
-}
-</style>

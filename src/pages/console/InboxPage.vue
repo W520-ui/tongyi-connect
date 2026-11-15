@@ -1,24 +1,25 @@
 <script setup lang="ts">
-import { useMessage } from 'naive-ui'
+import { toast } from 'vue-sonner'
 
-import ConversationPanel from '../../components/console/ConversationPanel.vue'
-import TicketList from '../../components/console/TicketList.vue'
-import { useInboxStore } from '../../stores/inbox'
+import ConversationPanel from '@/components/console/ConversationPanel.vue'
+import TicketList from '@/components/console/TicketList.vue'
+import { useInboxStore } from '@/stores/inbox'
 
 const inbox = useInboxStore()
-const message = useMessage()
 
 function acknowledge(id: string) {
-  if (inbox.acknowledge(id)) message.success('已确认接管，机器人会暂停自动回复')
+  if (inbox.acknowledge(id)) toast.success('已确认接管，机器人会暂停自动回复')
 }
 
 function resolve(id: string) {
-  if (inbox.resolve(id)) message.success('已标记解决，客户再发消息时机器人恢复接待')
+  if (inbox.resolve(id)) toast.success('已标记解决，客户再发消息时机器人恢复接待')
 }
 </script>
 
 <template>
-  <div class="inbox">
+  <div
+    class="grid h-auto grid-cols-1 gap-4 lg:h-[calc(100svh-7rem)] lg:min-h-[520px] lg:grid-cols-[minmax(300px,380px)_minmax(0,1fr)]"
+  >
     <TicketList
       :tickets="inbox.visible"
       :selected-id="inbox.selectedId"
@@ -27,28 +28,6 @@ function resolve(id: string) {
       @update:tab="inbox.setTab"
       @select="inbox.select"
     />
-    <ConversationPanel
-      :ticket="inbox.selected"
-      :thread="inbox.thread"
-      @acknowledge="acknowledge"
-      @resolve="resolve"
-    />
+    <ConversationPanel :ticket="inbox.selected" :thread="inbox.thread" @acknowledge="acknowledge" @resolve="resolve" />
   </div>
 </template>
-
-<style scoped>
-.inbox {
-  display: grid;
-  height: calc(100vh - 64px - 50px);
-  min-height: 520px;
-  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
-  gap: 16px;
-}
-
-@media (max-width: 960px) {
-  .inbox {
-    height: auto;
-    grid-template-columns: 1fr;
-  }
-}
-</style>

@@ -1,19 +1,20 @@
 <script setup lang="ts">
-import { Bot, CircleCheck, Hand, Sparkles, TriangleAlert, UserRound, Wrench } from 'lucide-vue-next'
-import { NButton, NCard, NEmpty, NIcon, NScrollbar, NTag, NTooltip } from 'naive-ui'
+import { Bot, CircleCheck, Hand, Sparkles, TriangleAlert, UserRound, Wrench } from '@lucide/vue'
 import { computed } from 'vue'
 
-import type { HandoffTicket } from '../../api/types'
-import type { InboxThread } from '../../fixtures/demo'
-import { CONVERSATION_STATUS_META, toolLabel } from '../../labels'
-import { clockTime, fromNow } from '../../utils/time'
+import type { HandoffTicket } from '@/api/types'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import type { InboxThread } from '@/fixtures/demo'
+import { CONVERSATION_STATUS_META, TONE_CLASSES, toolLabel } from '@/labels'
+import { clockTime, fromNow } from '@/utils/time'
 
 const props = defineProps<{ ticket: HandoffTicket | null; thread: InboxThread | null }>()
 const emit = defineEmits<{ acknowledge: [id: string]; resolve: [id: string] }>()
 
-const statusMeta = computed(() =>
-  props.thread ? CONVERSATION_STATUS_META[props.thread.conversation.status] : null,
-)
+const statusMeta = computed(() => (props.thread ? CONVERSATION_STATUS_META[props.thread.conversation.status] : null))
 const shortId = computed(() => props.thread?.conversation.id.replace(/^conv-/, '#') ?? '')
 const latestWorkflow = computed(() => {
   const messages = props.thread?.messages ?? []
@@ -23,339 +24,110 @@ const latestWorkflow = computed(() => {
   }
   return null
 })
-const sourceLabel = computed(() =>
-  latestWorkflow.value?.analysis_source === 'heuristic' ? '规则兜底' : '模型分析',
-)
+const sourceLabel = computed(() => (latestWorkflow.value?.analysis_source === 'heuristic' ? '规则兜底' : '模型分析'))
 </script>
 
 <template>
-  <NCard v-if="ticket && thread" :bordered="false" class="panel" content-class="panel-content">
-    <header class="panel-head">
-      <div class="panel-title">
-        <div class="title-line">
-          <h2>会话 <span class="mono">{{ shortId }}</span></h2>
-          <NTag v-if="statusMeta" size="small" :bordered="false" :type="statusMeta.type">{{ statusMeta.label }}</NTag>
+  <section v-if="ticket && thread" class="flex min-h-0 flex-col overflow-hidden rounded-xl border bg-card">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3.5">
+      <div class="min-w-0">
+        <div class="flex items-center gap-2">
+          <h2 class="text-base font-semibold">
+            会话 <span class="font-mono text-sm font-normal text-muted-foreground">{{ shortId }}</span>
+          </h2>
+          <Badge v-if="statusMeta" :class="TONE_CLASSES[statusMeta.tone]">{{ statusMeta.label }}</Badge>
         </div>
-        <p>{{ ticket.language_label }} · {{ ticket.intent_label }} · {{ fromNow(ticket.created_at) }}转入</p>
+        <p class="mt-0.5 text-xs text-muted-foreground">
+          {{ ticket.language_label }} · {{ ticket.intent_label }} · {{ fromNow(ticket.created_at) }}转入
+        </p>
       </div>
-      <div class="panel-actions">
-        <NButton v-if="ticket.status === 'open'" type="primary" @click="emit('acknowledge', ticket.id)">
-          <template #icon><NIcon :component="Hand" /></template>
+      <div class="flex items-center gap-2">
+        <Button v-if="ticket.status === 'open'" size="sm" @click="emit('acknowledge', ticket.id)">
+          <Hand />
           确认接管
-        </NButton>
-        <NButton
+        </Button>
+        <Button
           v-if="ticket.status !== 'resolved'"
-          :type="ticket.status === 'acknowledged' ? 'primary' : 'default'"
-          :secondary="ticket.status !== 'acknowledged'"
+          size="sm"
+          :variant="ticket.status === 'acknowledged' ? 'default' : 'outline'"
           @click="emit('resolve', ticket.id)"
         >
-          <template #icon><NIcon :component="CircleCheck" /></template>
+          <CircleCheck />
           标记解决
-        </NButton>
+        </Button>
       </div>
     </header>
 
-    <NScrollbar class="panel-scroll">
-      <div class="panel-body">
-        <section class="insights">
-          <div class="insight insight--summary">
-            <div class="insight-label">
-              <NIcon :size="15" :component="Sparkles" aria-hidden="true" />
+    <ScrollArea class="min-h-0 flex-1">
+      <div class="flex flex-col gap-6 p-5">
+        <div class="grid gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+          <div class="rounded-lg border p-4">
+            <div class="mb-2 flex items-center gap-1.5 text-xs font-medium">
+              <Sparkles class="size-3.5 text-brand" aria-hidden="true" />
               中文摘要
-              <span class="insight-source">{{ sourceLabel }}</span>
+              <Badge class="ml-auto" :class="TONE_CLASSES.brand">{{ sourceLabel }}</Badge>
             </div>
-            <p>{{ latestWorkflow?.merchant_summary || '暂无摘要' }}</p>
+            <p class="text-sm leading-relaxed text-muted-foreground">
+              {{ latestWorkflow?.merchant_summary || '暂无摘要' }}
+            </p>
           </div>
-          <div class="insight insight--reason">
-            <div class="insight-label">
-              <NIcon :size="15" :component="TriangleAlert" aria-hidden="true" />
+          <div class="rounded-lg bg-warning-soft p-4">
+            <div class="mb-2 flex items-center gap-1.5 text-xs font-medium text-warning">
+              <TriangleAlert class="size-3.5" aria-hidden="true" />
               转人工原因
             </div>
-            <p class="reason">{{ ticket.reason_text }}</p>
-            <p v-if="ticket.issue_summary" class="issue">{{ ticket.issue_summary }}</p>
+            <p class="text-sm font-medium">{{ ticket.reason_text }}</p>
+            <p v-if="ticket.issue_summary" class="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+              {{ ticket.issue_summary }}
+            </p>
           </div>
-        </section>
+        </div>
 
-        <section class="transcript" aria-label="对话记录">
-          <h3>对话记录</h3>
-          <div
-            v-for="message in thread.messages"
-            :key="message.id"
-            class="turn"
-            :class="message.role === 'user' ? 'turn--customer' : 'turn--agent'"
-          >
-            <div class="turn-avatar" aria-hidden="true">
-              <NIcon :size="15" :component="message.role === 'user' ? UserRound : Bot" />
-            </div>
-            <div class="turn-body">
-              <div class="turn-who">
-                <strong>{{ message.role === 'user' ? '客户' : 'Agent' }}</strong>
-                <time :datetime="message.created_at">{{ clockTime(message.created_at, 'zh-CN') }}</time>
+        <div>
+          <h3 class="mb-1 text-xs font-medium text-muted-foreground">对话记录</h3>
+          <ol class="divide-y divide-dashed">
+            <li v-for="message in thread.messages" :key="message.id" class="flex gap-3 py-3.5">
+              <div
+                class="grid size-7 shrink-0 place-items-center rounded-full"
+                :class="message.role === 'user' ? 'bg-info-soft text-info' : 'border bg-background text-muted-foreground'"
+                aria-hidden="true"
+              >
+                <component :is="message.role === 'user' ? UserRound : Bot" class="size-3.5" />
               </div>
-              <div class="turn-text">{{ message.content }}</div>
-              <div v-if="message.workflow?.trace.length" class="trace">
-                <NTooltip v-for="step in message.workflow.trace" :key="step.call_id">
-                  <template #trigger>
-                    <span class="trace-chip" :class="{ 'trace-chip--fail': !step.ok }">
-                      <NIcon :size="12" :component="Wrench" aria-hidden="true" />
-                      {{ toolLabel(step.name) }}
-                      <em>{{ step.latency_ms }}ms</em>
-                    </span>
-                  </template>
-                  <span class="mono">{{ step.name }}({{ JSON.stringify(step.args) }})</span>
-                </NTooltip>
+              <div class="min-w-0 flex-1">
+                <div class="mb-1 flex items-baseline gap-2 text-xs">
+                  <span class="font-medium">{{ message.role === 'user' ? '客户' : 'Agent' }}</span>
+                  <time class="text-muted-foreground" :datetime="message.created_at">
+                    {{ clockTime(message.created_at, 'zh-CN') }}
+                  </time>
+                </div>
+                <p class="text-sm leading-relaxed whitespace-pre-wrap">{{ message.content }}</p>
+                <div v-if="message.workflow?.trace.length" class="mt-2 flex flex-wrap gap-1.5">
+                  <Tooltip v-for="step in message.workflow.trace" :key="step.call_id">
+                    <TooltipTrigger as-child>
+                      <span
+                        tabindex="0"
+                        class="inline-flex cursor-default items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5 text-xs text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                      >
+                        <Wrench class="size-3" aria-hidden="true" />
+                        {{ toolLabel(step.name) }}
+                        <span class="tabular-nums">{{ step.latency_ms }}ms</span>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <span class="font-mono">{{ step.name }}({{ JSON.stringify(step.args) }})</span>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
               </div>
-            </div>
-          </div>
-        </section>
+            </li>
+          </ol>
+        </div>
       </div>
-    </NScrollbar>
-  </NCard>
+    </ScrollArea>
+  </section>
 
-  <NCard v-else :bordered="false" class="panel panel--empty">
-    <NEmpty description="在左侧选择一张工单查看会话" />
-  </NCard>
+  <section v-else class="grid place-items-center rounded-xl border bg-card p-12 text-sm text-muted-foreground">
+    在左侧选择一张工单查看会话
+  </section>
 </template>
-
-<style scoped>
-.panel {
-  display: flex;
-  height: 100%;
-  flex-direction: column;
-  box-shadow: var(--shadow-card);
-}
-
-.panel :deep(.panel-content) {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-  padding: 0;
-}
-
-.panel--empty {
-  align-items: center;
-  justify-content: center;
-}
-
-.panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px 22px;
-  border-bottom: 1px solid var(--line);
-}
-
-.title-line {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.title-line h2 {
-  margin: 0;
-  color: var(--text-strong);
-  font-size: 16px;
-}
-
-.title-line .mono {
-  color: var(--text-muted);
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.panel-title p {
-  margin: 4px 0 0;
-  color: var(--text-muted);
-  font-size: 12.5px;
-}
-
-.panel-actions {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 8px;
-}
-
-.panel-scroll {
-  min-height: 0;
-  flex: 1;
-}
-
-.panel-body {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-  padding: 20px 22px 26px;
-}
-
-.insights {
-  display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
-  gap: 14px;
-}
-
-.insight {
-  padding: 14px 16px;
-  border-radius: 14px;
-}
-
-.insight--summary {
-  border: 1px solid rgba(15, 118, 110, 0.16);
-  background: linear-gradient(135deg, var(--brand-soft) 0%, transparent 100%);
-}
-
-.insight--reason {
-  border: 1px solid rgba(217, 119, 6, 0.18);
-  background: var(--warn-soft);
-}
-
-.insight-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
-  color: var(--text-strong);
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-.insight--summary .insight-label :deep(.n-icon) {
-  color: var(--brand);
-}
-
-.insight--reason .insight-label :deep(.n-icon) {
-  color: var(--warn);
-}
-
-.insight-source {
-  margin-left: auto;
-  padding: 1px 8px;
-  border-radius: 999px;
-  color: var(--brand);
-  background: var(--brand-soft);
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.insight p {
-  margin: 0;
-  color: var(--text);
-  font-size: 13.5px;
-  line-height: 1.7;
-}
-
-.insight .reason {
-  color: var(--text-strong);
-  font-weight: 600;
-}
-
-.insight .issue {
-  margin-top: 6px;
-  color: var(--text-muted);
-  font-size: 12.5px;
-}
-
-.transcript h3 {
-  margin: 0 0 14px;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-}
-
-.turn {
-  display: flex;
-  gap: 12px;
-  padding: 12px 0;
-}
-
-.turn + .turn {
-  border-top: 1px dashed var(--line);
-}
-
-.turn-avatar {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
-  place-items: center;
-  border-radius: 50%;
-}
-
-.turn--customer .turn-avatar {
-  color: var(--info);
-  background: var(--info-soft);
-}
-
-.turn--agent .turn-avatar {
-  color: var(--brand);
-  background: var(--brand-soft);
-}
-
-.turn-body {
-  min-width: 0;
-  flex: 1;
-}
-
-.turn-who {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 4px;
-  font-size: 12.5px;
-}
-
-.turn-who strong {
-  color: var(--text-strong);
-}
-
-.turn-who time {
-  color: var(--text-faint);
-  font-size: 11.5px;
-}
-
-.turn-text {
-  color: var(--text);
-  font-size: 13.5px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-}
-
-.trace {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.trace-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--text);
-  background: var(--surface-muted);
-  cursor: default;
-  font-size: 11.5px;
-}
-
-.trace-chip em {
-  color: var(--text-faint);
-  font-style: normal;
-  font-variant-numeric: tabular-nums;
-}
-
-.trace-chip--fail {
-  border-color: rgba(220, 38, 38, 0.3);
-  color: #b91c1c;
-}
-
-@media (max-width: 1180px) {
-  .insights {
-    grid-template-columns: 1fr;
-  }
-}
-</style>

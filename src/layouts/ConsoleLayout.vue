@@ -1,251 +1,132 @@
 <script setup lang="ts">
-import { Activity, ChartColumn, ExternalLink, Inbox, Moon, Package, Sun } from 'lucide-vue-next'
-import {
-  NBadge,
-  NButton,
-  NIcon,
-  NLayout,
-  NLayoutContent,
-  NLayoutHeader,
-  NLayoutSider,
-  NMenu,
-  NTag,
-  NTooltip,
-  type MenuOption,
-} from 'naive-ui'
-import { computed, h, ref, type Component } from 'vue'
-import { RouterView, useRoute, useRouter } from 'vue-router'
+import { Activity, ChartColumn, ExternalLink, Inbox, Moon, Package, Sun } from '@lucide/vue'
+import { computed, type Component } from 'vue'
+import { RouterLink, RouterView, useRoute } from 'vue-router'
 
-import { systemStatus } from '../fixtures/demo'
-import { useInboxStore } from '../stores/inbox'
-import { useThemeMode } from '../theme'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { systemStatus } from '@/fixtures/demo'
+import { useInboxStore } from '@/stores/inbox'
+import { useConsoleTheme } from '@/theme'
+
+interface NavItem {
+  name: string
+  label: string
+  icon: Component
+}
+
+const NAV: NavItem[] = [
+  { name: 'inbox', label: '收件箱', icon: Inbox },
+  { name: 'dashboard', label: '数据看板', icon: ChartColumn },
+  { name: 'catalog', label: '商品资料', icon: Package },
+  { name: 'system', label: '系统状态', icon: Activity },
+]
 
 const route = useRoute()
-const router = useRouter()
 const inbox = useInboxStore()
-const { isDark, toggle } = useThemeMode()
-const collapsed = ref(false)
+const { isDark, toggle } = useConsoleTheme()
 const status = systemStatus
 
-function icon(component: Component) {
-  return () => h(NIcon, null, { default: () => h(component) })
-}
-
-const menuOptions = computed<MenuOption[]>(() => [
-  {
-    key: 'inbox',
-    label: '收件箱',
-    icon: icon(Inbox),
-    extra: () =>
-      inbox.counts.open ? h(NBadge, { value: inbox.counts.open, type: 'warning', max: 99 }) : null,
-  },
-  { key: 'dashboard', label: '数据看板', icon: icon(ChartColumn) },
-  { key: 'catalog', label: '商品资料', icon: icon(Package) },
-  { key: 'system', label: '系统状态', icon: icon(Activity) },
-])
-
-const activeKey = computed(() => String(route.name ?? ''))
 const title = computed(() => route.meta.title ?? '')
 const subtitle = computed(() => route.meta.subtitle ?? '')
-
-function navigate(key: string) {
-  void router.push({ name: key })
-}
+const themeLabel = computed(() => (isDark.value ? '切换到浅色' : '切换到深色'))
 </script>
 
 <template>
-  <NLayout has-sider class="console">
-    <NLayoutSider
-      bordered
-      collapse-mode="width"
-      :collapsed-width="72"
-      :width="236"
-      :collapsed="collapsed"
-      show-trigger="bar"
-      :native-scrollbar="false"
-      @collapse="collapsed = true"
-      @expand="collapsed = false"
-    >
-      <div class="brand" :class="{ 'brand--collapsed': collapsed }">
-        <div class="brand-mark" aria-hidden="true">通</div>
-        <div v-if="!collapsed" class="brand-copy">
-          <strong>通译智联</strong>
-          <span>商家控制台</span>
+  <div class="flex h-svh bg-background text-foreground">
+    <aside class="hidden w-60 shrink-0 flex-col border-r bg-sidebar md:flex">
+      <div class="flex h-16 items-center gap-2.5 px-5">
+        <div
+          class="grid size-8 place-items-center rounded-lg bg-brand text-sm font-semibold text-brand-foreground"
+          aria-hidden="true"
+        >
+          通
+        </div>
+        <div class="leading-tight">
+          <p class="text-sm font-semibold">通译智联</p>
+          <p class="text-xs text-muted-foreground">商家控制台</p>
         </div>
       </div>
-      <NMenu
-        :value="activeKey"
-        :options="menuOptions"
-        :collapsed="collapsed"
-        :collapsed-width="72"
-        :collapsed-icon-size="20"
-        :icon-size="18"
-        @update:value="navigate"
-      />
-    </NLayoutSider>
 
-    <NLayout class="main">
-      <NLayoutHeader bordered class="header">
-        <div class="heading">
-          <h1>{{ title }}</h1>
-          <p>{{ subtitle }}</p>
+      <nav class="flex flex-col gap-0.5 px-3 py-2" aria-label="主导航">
+        <RouterLink
+          v-for="item in NAV"
+          :key="item.name"
+          :to="{ name: item.name }"
+          class="flex h-9 items-center gap-2.5 rounded-md px-2.5 text-sm text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          active-class="bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+        >
+          <component :is="item.icon" class="size-4" aria-hidden="true" />
+          <span class="flex-1">{{ item.label }}</span>
+          <Badge
+            v-if="item.name === 'inbox' && inbox.counts.open"
+            class="min-w-5 rounded-full bg-warning-soft px-1.5 text-warning tabular-nums"
+          >
+            {{ inbox.counts.open }}
+          </Badge>
+        </RouterLink>
+      </nav>
+
+      <div class="mt-auto p-3">
+        <a
+          href="/chat"
+          target="_blank"
+          rel="noopener"
+          class="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ExternalLink class="size-4" aria-hidden="true" />
+          打开客户窗口
+        </a>
+      </div>
+    </aside>
+
+    <div class="flex min-w-0 flex-1 flex-col">
+      <header class="flex h-16 shrink-0 items-center justify-between gap-4 border-b px-4 sm:px-6">
+        <div class="flex min-w-0 items-center gap-3">
+          <nav class="flex items-center gap-1 md:hidden" aria-label="主导航">
+            <RouterLink
+              v-for="item in NAV"
+              :key="item.name"
+              :to="{ name: item.name }"
+              :aria-label="item.label"
+              class="grid size-8 place-items-center rounded-md text-muted-foreground"
+              active-class="bg-muted text-foreground"
+            >
+              <component :is="item.icon" class="size-4" />
+            </RouterLink>
+          </nav>
+          <div class="min-w-0">
+            <h1 class="truncate text-base font-semibold">{{ title }}</h1>
+            <p class="hidden truncate text-xs text-muted-foreground sm:block">{{ subtitle }}</p>
+          </div>
         </div>
-        <div class="header-actions">
-          <NTag size="small" :bordered="false" round class="proto-tag">原型 · 演示数据</NTag>
-          <span class="model-pill" :class="status.llm_configured ? 'model-pill--ok' : 'model-pill--warn'">
-            <i aria-hidden="true" />
+
+        <div class="flex items-center gap-2">
+          <Badge variant="outline" class="hidden font-normal text-muted-foreground lg:inline-flex">原型 · 演示数据</Badge>
+          <span class="hidden items-center gap-2 rounded-md border px-2.5 py-1 text-xs text-muted-foreground sm:inline-flex">
+            <span
+              class="size-1.5 rounded-full"
+              :class="status.llm_configured ? 'bg-success' : 'bg-warning'"
+              aria-hidden="true"
+            />
             {{ status.llm_configured ? `模型已连接 · ${status.model}` : '模型未配置' }}
           </span>
-          <NButton tag="a" href="/chat" target="_blank" size="small" secondary>
-            <template #icon><NIcon :component="ExternalLink" /></template>
-            客户窗口
-          </NButton>
-          <NTooltip>
-            <template #trigger>
-              <NButton quaternary circle :aria-label="isDark ? '切换到浅色' : '切换到深色'" @click="toggle">
-                <template #icon><NIcon :component="isDark ? Sun : Moon" /></template>
-              </NButton>
-            </template>
-            {{ isDark ? '切换到浅色' : '切换到深色' }}
-          </NTooltip>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button variant="ghost" size="icon-sm" :aria-label="themeLabel" @click="toggle">
+                <Sun v-if="isDark" />
+                <Moon v-else />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{{ themeLabel }}</TooltipContent>
+          </Tooltip>
         </div>
-      </NLayoutHeader>
+      </header>
 
-      <NLayoutContent class="content" :native-scrollbar="false" content-class="content-inner">
+      <main class="min-h-0 flex-1 overflow-y-auto bg-muted/40 p-4 [scrollbar-width:thin] sm:p-6">
         <RouterView />
-      </NLayoutContent>
-    </NLayout>
-  </NLayout>
+      </main>
+    </div>
+  </div>
 </template>
-
-<style scoped>
-.console {
-  height: 100vh;
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 64px;
-  padding: 0 20px;
-}
-
-.brand--collapsed {
-  justify-content: center;
-  padding: 0;
-}
-
-.brand-mark {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  flex: 0 0 auto;
-  place-items: center;
-  border-radius: 11px;
-  color: #fff;
-  background: var(--mark-gradient);
-  box-shadow: 0 8px 18px -8px rgba(15, 118, 110, 0.65);
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.brand-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  white-space: nowrap;
-}
-
-.brand-copy strong {
-  color: var(--text-strong);
-  font-size: 15px;
-  letter-spacing: 0.02em;
-}
-
-.brand-copy span {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.main {
-  height: 100vh;
-}
-
-.header {
-  display: flex;
-  height: 64px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 0 24px;
-}
-
-.heading h1 {
-  margin: 0;
-  color: var(--text-strong);
-  font-size: 17px;
-  letter-spacing: -0.01em;
-}
-
-.heading p {
-  margin: 2px 0 0;
-  color: var(--text-muted);
-  font-size: 12.5px;
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.proto-tag {
-  color: var(--info);
-  background: var(--info-soft);
-}
-
-.model-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 11px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--text);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.model-pill i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-
-.model-pill--ok i {
-  background: #22c55e;
-  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
-}
-
-.model-pill--warn i {
-  background: #f59e0b;
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
-}
-
-.content {
-  height: calc(100vh - 64px);
-}
-
-.content :deep(.content-inner) {
-  min-height: 100%;
-  padding: 22px 24px 28px;
-}
-
-@media (max-width: 900px) {
-  .proto-tag,
-  .model-pill {
-    display: none;
-  }
-}
-</style>
