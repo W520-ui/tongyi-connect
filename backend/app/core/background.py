@@ -9,6 +9,7 @@ class BackgroundTasks:
         task = asyncio.create_task(coroutine)
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
+        return task
 
     async def close(self):
         for task in tuple(self.tasks):

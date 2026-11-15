@@ -1,10 +1,23 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.deps import get_analytics, get_catalog, get_handoffs
+from app.api.deps import (
+    get_analytics,
+    get_catalog,
+    get_conversation_service,
+    get_handoffs,
+    require_merchant,
+)
 from app.api.v1.schemas.agent import ProductSchema
-from app.api.v1.schemas.workflow import Acknowledgment, DashboardOverview, Envelope, RecentInquiry
+from app.api.v1.schemas.workflow import (
+    Acknowledgment,
+    DashboardOverview,
+    Envelope,
+    RecentInquiry,
+)
+from app.core.errors import AppError
 from app.services.analytics import AnalyticsService
 from app.services.catalog import CatalogService
+from app.services.conversation import ConversationService
 from app.services.handoff import HandoffService
 
 router = APIRouter(tags=["Workflow"])
@@ -17,12 +30,20 @@ async def catalog_products(catalog: CatalogService = Depends(get_catalog)):
     )
 
 
-@router.get("/dashboard/overview", response_model=Envelope[DashboardOverview])
+@router.get(
+    "/dashboard/overview",
+    response_model=Envelope[DashboardOverview],
+    dependencies=[Depends(require_merchant)],
+)
 async def dashboard_overview(analytics: AnalyticsService = Depends(get_analytics)):
     return Envelope(data=DashboardOverview(**await analytics.snapshot()))
 
 
-@router.get("/dashboard/recent", response_model=Envelope[list[RecentInquiry]])
+@router.get(
+    "/dashboard/recent",
+    response_model=Envelope[list[RecentInquiry]],
+    dependencies=[Depends(require_merchant)],
+)
 async def dashboard_recent(
     limit: int = Query(default=8, ge=1, le=20), analytics: AnalyticsService = Depends(get_analytics)
 ):
@@ -30,9 +51,15 @@ async def dashboard_recent(
 
 
 @router.post("/dashboard/handoffs/{record_id}/acknowledge", response_model=Envelope[Acknowledgment])
-async def acknowledge_handoff(record_id: str, handoffs: HandoffService = Depends(get_handoffs)):
-    if not await handoffs.acknowledge(record_id):
-        raise HTTPException(status_code=404, detail="待接管记录不存在或已处理")
+async def acknowledge_handoff(
+    record_id: str, service: ConversationService = Depends(get_conversation_service)
+):
+    try:
+        await service.change_handoff(record_id)
+    except AppError as error:
+        if error.code not in {"HANDOFF_NOT_FOUND", "INVALID_STATE"}:
+            raise
+        raise HTTPException(status_code=404, detail="待接管记录不存在或已处理") from None
     return Envelope(data=Acknowledgment(record_id=record_id))
 
 

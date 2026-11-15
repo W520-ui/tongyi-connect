@@ -1,4 +1,7 @@
 ERRORS = {
+    "VALIDATION_ERROR": (422, "请求参数不合法"),
+    "UNAUTHORIZED": (401, "商家密钥缺失或不正确"),
+    "RATE_LIMITED": (429, "请求过于频繁，请稍后重试"),
     "CONVERSATION_NOT_FOUND": (404, "会话不存在或已过期"),
     "HANDOFF_NOT_FOUND": (404, "工单不存在"),
     "INVALID_STATE": (409, "当前状态不允许这个操作"),
@@ -13,11 +16,12 @@ ERRORS = {
 
 
 class AppError(Exception):
-    def __init__(self, code: str, message: str | None = None) -> None:
+    def __init__(self, code: str, message: str | None = None, *, details=None) -> None:
         self.code = code
         self.status_code, default_message = ERRORS[code]
         self.message = message or default_message
         self.recorded = False
+        self.details = details
         super().__init__(self.message)
 
 

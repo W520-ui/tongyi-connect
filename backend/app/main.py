@@ -1,10 +1,12 @@
+import logging
 from contextlib import AsyncExitStack, asynccontextmanager
 from importlib.resources import files
 
 import httpx
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.openapi.utils import get_openapi
 
 from app.agent.analysis import PostAnalyzer
 from app.agent.context import ContextBuilder
@@ -12,7 +14,9 @@ from app.agent.llm.base import LLMClient
 from app.agent.llm.openai import OpenAICompatibleClient
 from app.agent.registry import create_default_registry
 from app.agent.runtime import AgentRunner
+from app.api.errors import SafeErrorsMiddleware, error_response
 from app.api.router import api_router
+from app.api.v1.schemas.stream import STREAM_SCHEMAS
 from app.core.background import BackgroundTasks
 from app.core.config import Settings
 from app.core.db import Database
@@ -41,7 +45,12 @@ def create_app(
         configure_logging(
             settings.log_level,
             settings.llm_api_key.get_secret_value() if settings.llm_api_key else None,
+            settings.merchant_api_key.get_secret_value() if settings.merchant_api_key else None,
         )
+        if not settings.merchant_api_key or not settings.merchant_api_key.get_secret_value():
+            logging.getLogger(__name__).warning(
+                "MERCHANT_API_KEY is not configured; merchant endpoints allow demo access"
+            )
         async with AsyncExitStack() as resources:
             client = await resources.enter_async_context(httpx.AsyncClient())
             database = Database(settings.database_url)
@@ -118,6 +127,7 @@ def create_app(
         openapi_url="/openapi.json" if settings.debug else None,
         lifespan=lifespan,
     )
+    application.add_middleware(SafeErrorsMiddleware)
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -129,14 +139,33 @@ def create_app(
 
     @application.exception_handler(AppError)
     async def app_error(_request, error: AppError):
-        return JSONResponse(
-            status_code=error.status_code,
-            content={
-                "status": "error",
-                "detail": error.message,
-                "error": {"code": error.code, "message": error.message, "details": None},
-            },
+        return error_response(error)
+
+    @application.exception_handler(RequestValidationError)
+    async def validation_error(_request, error: RequestValidationError):
+        return error_response(
+            AppError(
+                "VALIDATION_ERROR",
+                details=[{"loc": list(item["loc"]), "msg": item["msg"]} for item in error.errors()],
+            )
         )
+
+    def openapi():
+        if application.openapi_schema is None:
+            schema = get_openapi(
+                title=application.title,
+                version=application.version,
+                routes=application.routes,
+            )
+            schemas = schema.setdefault("components", {}).setdefault("schemas", {})
+            for model in STREAM_SCHEMAS.values():
+                definition = model.model_json_schema(ref_template="#/components/schemas/{model}")
+                schemas.update(definition.pop("$defs", {}))
+                schemas[model.__name__] = definition
+            application.openapi_schema = schema
+        return application.openapi_schema
+
+    application.openapi = openapi
 
     return application
 

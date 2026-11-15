@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     database_url: str = "sqlite+aiosqlite:///data/app.db"
     merchant_id: str = "demo"
+    merchant_api_key: SecretStr | None = None
     llm_base_url: str = Field(
         default="https://api.openai.com/v1", validation_alias="AGENT_LLM_BASE_URL"
     )

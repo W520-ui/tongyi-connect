@@ -12,7 +12,7 @@ from app.agent.analysis import PostAnalyzer, heuristic_outcome
 from app.agent.commands import HELP_TEXT, CommandRouter
 from app.agent.context import ContextBuilder
 from app.agent.effects import FocusProducts, RequestHandoff, UpdateSlots
-from app.agent.events import RunCompleted, RunFailed, ToolFinished, ToolStarted
+from app.agent.events import RunCompleted, RunFailed, TextDelta, ToolFinished, ToolStarted
 from app.agent.guardrails import analyze_message, detect_language
 from app.agent.runtime import AgentRunner, RunContext
 from app.agent.tools.deps import CatalogPort
@@ -22,9 +22,10 @@ from app.core.errors import AppError
 from app.core.locks import ConversationLocks
 from app.domain.types import InboundMessage, RunTrace, ToolTraceEntry, WorkflowResult
 from app.repositories.conversations import ConversationRepository, now
-from app.repositories.models import AgentRun, RequestFailure, StoredMessage
+from app.repositories.models import AgentRun, CommandReceipt, RequestFailure, StoredMessage
 from app.services.analytics import AnalyticsService
 from app.services.catalog import CatalogService
+from app.services.events import AnalysisCompleted, WorkflowCompleted
 from app.services.handoff import HandoffService
 from app.services.results import restore_result
 
@@ -61,8 +62,81 @@ class ConversationService:
         self.analyzer, self.background = analyzer, background
         self.commands, self.tool_deps = CommandRouter(), ServiceToolDeps(catalog)
 
-    async def handle_inbound(self, inbound: InboundMessage) -> WorkflowResult:
-        key = (inbound.session_id or str(uuid4()))[:120]
+    async def describe(self, conversation_id):
+        snapshot = await self.store.get(conversation_id)
+        ticket = await self.handoffs.pending_for(conversation_id)
+        return {
+            "id": snapshot.session_id,
+            "status": snapshot.status,
+            "reply_language": snapshot.reply_language,
+            "state": {
+                "focused_product_ids": list(snapshot.focused_product_ids),
+                "destination_country": snapshot.destination_country,
+                "quantity": snapshot.quantity,
+            },
+            "open_handoff": ticket,
+            "created_at": snapshot.created_at,
+            "updated_at": snapshot.updated_at,
+            "last_message_at": snapshot.last_message_at,
+        }
+
+    async def create(self, reply_language=None):
+        snapshot = await self.store.create(reply_language)
+        return await self.describe(snapshot.session_id)
+
+    async def update_language(self, conversation_id, language):
+        async with self.locks.hold(conversation_id):
+            snapshot = await self.store.get(conversation_id)
+            snapshot.reply_language = language
+            await self.store.save_state(snapshot)
+            return await self.describe(conversation_id)
+
+    async def history(self, conversation_id, limit=50, before_seq=None):
+        await self.store.get(conversation_id)
+        items, has_more = await self.store.history(conversation_id, limit, before_seq)
+        for item in items:
+            if item["workflow"]:
+                item["workflow"] = restore_result(item["workflow"])
+        return items, has_more
+
+    async def reset(self, conversation_id):
+        async with self.locks.hold(conversation_id):
+            snapshot = await self.store.get(conversation_id)
+            replacement = await self.handoffs.reset(snapshot)
+            return await self.describe(replacement.session_id)
+
+    async def request_handoff(self, conversation_id, reason_text):
+        async with self.locks.hold(conversation_id):
+            snapshot = await self.store.get(conversation_id)
+            analysis = analyze_message("/handoff", await self.catalog.list_products())
+            latest = next((turn for turn in reversed(snapshot.turns) if turn.role == "user"), None)
+            if latest:
+                analysis = analyze_message(latest.content, await self.catalog.list_products())
+            async with self.database.transaction() as transaction:
+                ticket = await self.handoffs.pending_for(conversation_id, transaction)
+                if ticket is None:
+                    await self.store.update(transaction, snapshot, status="pending_human")
+                    ticket = await self.handoffs.request(
+                        transaction,
+                        snapshot,
+                        RequestHandoff("user_request", reason_text),
+                        latest.id if latest else None,
+                        latest.content if latest else "",
+                        analysis,
+                    )
+            return await self.describe(conversation_id), ticket
+
+    async def change_handoff(self, ticket_id, *, resolve=False):
+        ticket = await self.handoffs.get(ticket_id)
+        async with self.locks.hold(ticket.conversation_id):
+            return await self.handoffs.change(ticket_id, resolve=resolve)
+
+    async def handle_inbound(
+        self, inbound: InboundMessage, *, emit=None, ready=None
+    ) -> WorkflowResult:
+        key = inbound.session_id or str(uuid4())
+        if inbound.legacy_session:
+            key = key[:120]
         try:
             async with self.locks.hold(key):
                 resolved = (
@@ -78,17 +152,45 @@ class ConversationService:
                     snapshot = await self.store.get(resolved.session_id)
                     replay = await self._replay(snapshot, inbound)
                     if replay is not None:
+                        if ready:
+                            ready()
+                        if emit:
+                            await emit(WorkflowCompleted(replay))
                         return replay
                     parsed = self.commands.parse(inbound.message)
+                    if not inbound.legacy_session and not parsed:
+                        if (
+                            snapshot.status != "human_active"
+                            and not self.runner.client.is_configured
+                        ):
+                            raise AppError("LLM_NOT_CONFIGURED")
+                    if ready:
+                        ready()
                     if parsed:
-                        result = await self.commands.handle(
-                            *parsed, _CommandActions(self, inbound, snapshot)
-                        )
+                        async with self.database.transaction() as transaction:
+                            result = await self.commands.handle(
+                                *parsed, _CommandActions(self, inbound, snapshot, transaction)
+                            )
+                            if result is not None and inbound.client_message_id:
+                                transaction.add(
+                                    CommandReceipt(
+                                        merchant_id=self.settings.merchant_id,
+                                        conversation_id=resolved.session_id,
+                                        client_message_id=inbound.client_message_id,
+                                        workflow=asdict(result),
+                                        created_at=now(),
+                                    )
+                                )
                         if result is not None:
+                            if emit:
+                                await emit(WorkflowCompleted(result))
                             return result
                     if snapshot.status == "human_active":
-                        return await self._paused(snapshot, inbound)
-                    return await self._run(snapshot, inbound)
+                        result = await self._paused(snapshot, inbound)
+                        if emit:
+                            await emit(WorkflowCompleted(result))
+                        return result
+                    return await self._run(snapshot, inbound, emit=emit)
         except AppError as error:
             if not error.recorded:
                 await self.analytics.record_failed_request(error.code)
@@ -105,6 +207,11 @@ class ConversationService:
         if not inbound.client_message_id:
             return None
         async with self.database.sessions() as transaction:
+            receipt = await transaction.get(
+                CommandReceipt, (snapshot.session_id, inbound.client_message_id)
+            )
+            if receipt and receipt.merchant_id == self.settings.merchant_id:
+                return replace(restore_result(receipt.workflow), replayed=True)
             user = await transaction.scalar(
                 select(StoredMessage).where(
                     StoredMessage.conversation_id == snapshot.session_id,
@@ -168,6 +275,7 @@ class ConversationService:
             RunTrace(),
             ("处理本地指令",),
             snapshot.status,
+            message_id=str(uuid4()),
             client_message_id=inbound.client_message_id,
             handoff_id=handoff_id,
         )
@@ -215,7 +323,7 @@ class ConversationService:
             "workflow": workflow,
         }
 
-    async def _run(self, snapshot, inbound):
+    async def _run(self, snapshot, inbound, *, emit=None):
         started = perf_counter()
         analysis = analyze_message(
             inbound.message, await self.catalog.list_products(), snapshot.last_product_id
@@ -228,6 +336,8 @@ class ConversationService:
             async for event in self.runner.run(
                 RunContext(built.messages, self.tool_deps, inbound.streaming)
             ):
+                if emit and isinstance(event, (ToolStarted, ToolFinished, TextDelta)):
+                    await emit(event)
                 if isinstance(event, ToolStarted):
                     steps.append(f"调用工具：{event.name}")
                     observed[(event.round, event.call_id)] = (event, None)
@@ -364,7 +474,15 @@ class ConversationService:
                     created_at=timestamp,
                 )
             )
-        final = await self._analyze(result, fallback, started, inbound.message)
+        if emit:
+            await emit(WorkflowCompleted(replace(result, analysis_source="pending")))
+        try:
+            final, outcome = await self._analyze(result, fallback, started, inbound.message)
+        except Exception:
+            logger.exception("Post-analysis failed; using the saved heuristic result")
+            final, outcome = result, fallback
+        if emit:
+            await emit(AnalysisCompleted(final, outcome))
         if self.settings.summary_enabled and built.omitted:
             earlier = built.omitted
             if snapshot.summary:
@@ -417,8 +535,8 @@ class ConversationService:
                     run.completion_tokens += analyzed.usage.completion_tokens
         except Exception:
             logger.exception("Unable to persist post-analysis; returning saved heuristic result")
-            return result
-        return final
+            return result, fallback
+        return final, outcome
 
     async def _save_failure(self, snapshot, inbound, analysis, error, observed, started, failure):
         message_id, run_id = str(uuid4()), str(uuid4())
@@ -509,11 +627,12 @@ class _Unlocked:
 
 
 class _CommandActions:
-    def __init__(self, service, inbound, snapshot):
+    def __init__(self, service, inbound, snapshot, transaction):
         self.service, self.inbound, self.snapshot = service, inbound, snapshot
+        self.transaction = transaction
 
     async def result(self, text):
-        ticket = await self.service.handoffs.pending_for(self.snapshot.session_id)
+        ticket = await self.service.handoffs.pending_for(self.snapshot.session_id, self.transaction)
         return await self.service._base_result(
             self.snapshot,
             self.inbound,
@@ -546,28 +665,27 @@ class _CommandActions:
                 "用法：/lang zh-CN、/lang en-US 或 /lang es-ES；请选择有效的语言。"
             )
         self.snapshot.reply_language = language
-        self.snapshot = await self.service.store.save_state(self.snapshot)
+        await self.service.store.update(self.transaction, self.snapshot, reply_language=language)
         return await self.result(f"会话语言偏好已设置为 {language}。")
 
     async def command_reset(self):
-        self.snapshot = await self.service.handoffs.reset(self.snapshot)
+        self.snapshot = await self.service.handoffs.reset(self.snapshot, self.transaction)
         return await self.result("当前会话已关闭，已新建会话，可以重新开始咨询。")
 
     async def command_handoff(self):
         analysis = analyze_message(self.inbound.message, await self.service.catalog.list_products())
-        async with self.service.database.transaction() as transaction:
-            existing = await self.service.handoffs.pending_for(
-                self.snapshot.session_id, transaction
+        existing = await self.service.handoffs.pending_for(
+            self.snapshot.session_id, self.transaction
+        )
+        if not existing:
+            await self.service.store.update(self.transaction, self.snapshot, status="pending_human")
+            await self.service.handoffs.request(
+                self.transaction,
+                self.snapshot,
+                RequestHandoff("user_request", "用户主动请求人工接管"),
+                None,
+                self.inbound.message,
+                analysis,
             )
-            if not existing:
-                await self.service.store.update(transaction, self.snapshot, status="pending_human")
-                await self.service.handoffs.request(
-                    transaction,
-                    self.snapshot,
-                    RequestHandoff("user_request", "用户主动请求人工接管"),
-                    None,
-                    self.inbound.message,
-                    analysis,
-                )
-        self.snapshot = await self.service.store.get(self.snapshot.session_id)
+            self.snapshot.status = "pending_human"
         return await self.result("已登记人工接管请求，商家会在看板的接管队列中看到这条咨询。")

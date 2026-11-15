@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from uuid import uuid4
 
 from sqlalchemy import select, update
@@ -25,6 +26,27 @@ class HandoffService:
 
     async def pending(self, limit=20):
         return await AnalyticsRepository(self.database, self.merchant_id).pending(limit)
+
+    async def get(self, ticket_id):
+        async with self.database.sessions() as transaction:
+            ticket = await transaction.get(HandoffTicket, ticket_id)
+            if ticket is None or ticket.merchant_id != self.merchant_id:
+                raise AppError("HANDOFF_NOT_FOUND")
+            return ticket
+
+    async def list_tickets(self, statuses, limit=20):
+        async with self.database.sessions() as transaction:
+            return (
+                await transaction.scalars(
+                    select(HandoffTicket)
+                    .where(
+                        HandoffTicket.merchant_id == self.merchant_id,
+                        HandoffTicket.status.in_(statuses),
+                    )
+                    .order_by(HandoffTicket.created_at.desc(), HandoffTicket.id.desc())
+                    .limit(limit)
+                )
+            ).all()
 
     async def pending_for(self, conversation_id, transaction=None):
         if transaction is None:
@@ -93,9 +115,13 @@ class HandoffService:
     async def resolve(self, ticket_id):
         return await self.change(ticket_id, resolve=True)
 
-    async def reset(self, snapshot):
+    async def reset(self, snapshot, transaction=None):
         replacement = new_conversation(self.merchant_id)
-        async with self.database.transaction() as transaction:
+        async with (
+            self.database.transaction()
+            if transaction is None
+            else nullcontext(transaction) as transaction
+        ):
             await self.conversations.update(
                 transaction, snapshot, status="resolved", state=empty_state(), reply_language=None
             )

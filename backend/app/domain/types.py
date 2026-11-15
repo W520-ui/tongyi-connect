@@ -5,6 +5,7 @@ Language = Literal["zh-CN", "en-US", "es-ES"]
 Intent = Literal["quote", "logistics", "specs", "after_sales", "general"]
 ReplySource = Literal["native", "native+human-handoff", "paused-for-human"]
 ConversationStatus = Literal["bot_active", "pending_human", "human_active", "resolved"]
+AnalysisSource = Literal["llm", "heuristic", "pending"]
 
 INTENT_LABELS: dict[Intent, str] = {
     "quote": "询价",
@@ -164,5 +165,5 @@ class WorkflowResult:
     client_message_id: str | None = None
     run_id: str | None = None
     replayed: bool = False
-    analysis_source: Literal["llm", "heuristic"] = "heuristic"
+    analysis_source: AnalysisSource = "heuristic"
     handoff_id: str | None = None

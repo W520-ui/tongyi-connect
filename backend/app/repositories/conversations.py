@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.db import Database
 from app.core.errors import AppError
 from app.domain.types import Session, Turn
-from app.repositories.models import Conversation, ConversationAlias, StoredMessage
+from app.repositories.models import AgentRun, Conversation, ConversationAlias, StoredMessage
 
 
 def now():
@@ -121,6 +121,38 @@ class ConversationRepository:
     async def load(self, key):
         resolved = await self.resolve(key)
         return await self.get(resolved.session_id)
+
+    async def history(self, conversation_id, limit=50, before_seq=None):
+        async with self.database.sessions() as transaction:
+            query = (
+                select(StoredMessage, AgentRun.workflow)
+                .outerjoin(AgentRun, StoredMessage.run_id == AgentRun.id)
+                .where(
+                    StoredMessage.conversation_id == conversation_id,
+                    StoredMessage.merchant_id == self.merchant_id,
+                    StoredMessage.role.in_(("user", "assistant", "human_agent")),
+                    func.coalesce(func.json_array_length(StoredMessage.tool_calls), 0) == 0,
+                )
+            )
+            if before_seq is not None:
+                query = query.where(StoredMessage.seq < before_seq)
+            rows = (
+                await transaction.execute(query.order_by(StoredMessage.seq.desc()).limit(limit + 1))
+            ).all()
+            return [
+                {
+                    "id": message.id,
+                    "seq": message.seq,
+                    "role": message.role,
+                    "content": message.content,
+                    "created_at": message.created_at,
+                    "client_message_id": message.client_message_id
+                    if message.role == "user"
+                    else None,
+                    "workflow": workflow if message.role == "assistant" else None,
+                }
+                for message, workflow in reversed(rows[:limit])
+            ], len(rows) > limit
 
     async def update(self, transaction, snapshot, **values):
         result = await transaction.execute(

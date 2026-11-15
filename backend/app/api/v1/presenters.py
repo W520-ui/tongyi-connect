@@ -1,8 +1,13 @@
-from app.api.v1.schemas.agent import AgentWorkflowData, ProductSchema, ToolTraceSchema
+from app.api.v1.schemas.agent import (
+    AgentWorkflowData,
+    LegacyAgentWorkflowData,
+    ProductSchema,
+    ToolTraceSchema,
+)
 from app.domain.types import INTENT_LABELS, LANGUAGE_LABELS, WorkflowResult
 
 
-def present_workflow(result: WorkflowResult) -> AgentWorkflowData:
+def present_workflow(result: WorkflowResult) -> LegacyAgentWorkflowData:
     analysis = result.analysis
     plan = []
     if result.products:
@@ -19,7 +24,7 @@ def present_workflow(result: WorkflowResult) -> AgentWorkflowData:
         plan.append("澄清客户需求并推荐下一步")
     plan.append("生成对客多语言回复和商家中文摘要")
     product = result.products[0] if result.products else None
-    return AgentWorkflowData(
+    return LegacyAgentWorkflowData(
         reply=result.reply,
         merchant_summary=result.merchant_summary,
         intent=analysis.intent,
@@ -48,3 +53,7 @@ def present_workflow(result: WorkflowResult) -> AgentWorkflowData:
         conversation_status=result.conversation_status,
         analysis_source=result.analysis_source,
     )
+
+
+def present_public_workflow(result: WorkflowResult) -> AgentWorkflowData:
+    return AgentWorkflowData.model_validate(present_workflow(result).model_dump())

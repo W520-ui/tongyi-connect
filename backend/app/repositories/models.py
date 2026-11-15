@@ -68,6 +68,15 @@ class RequestFailure(Base):
     created_at: Mapped[str]
 
 
+class CommandReceipt(Base):
+    __tablename__ = "command_receipts"
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id"), index=True)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), primary_key=True)
+    client_message_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workflow: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[str]
+
+
 class StoredMessage(Base):
     __tablename__ = "messages"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)

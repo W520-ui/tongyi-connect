@@ -31,7 +31,7 @@ async def test_migration_matches_models_and_legacy_tables_are_absent(runtime_fac
             )
 
         await connection.run_sync(compare)
-        assert await connection.scalar(text("SELECT version_num FROM alembic_version")) == "0001"
+        assert await connection.scalar(text("SELECT version_num FROM alembic_version")) == "0002"
         assert await connection.scalar(text("PRAGMA journal_mode")) == "wal"
 
 

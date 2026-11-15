@@ -174,7 +174,7 @@ def test_openapi_export_does_not_start_resources(tmp_path, settings_factory, mon
     schema = json.loads(target.read_text(encoding="utf-8"))
     assert "/api/v1/status" in schema["paths"]
     assert "/api/v1/agent/chat" in schema["paths"]
-    workflow = schema["components"]["schemas"]["AgentWorkflowData"]
+    workflow = schema["components"]["schemas"]["LegacyAgentWorkflowData"]
     assert "session_id" in workflow["properties"]
     assert "trace" in workflow["properties"]
     assert "test-key" not in target.read_text(encoding="utf-8")
