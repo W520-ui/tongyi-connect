@@ -20,7 +20,10 @@ class ContextBuilder:
                 )
         lines.append(f"Destination country: {session.destination_country or 'unset'}")
         lines.append(f"Quantity: {session.quantity or 'unset'}")
-        lines.append(f"Reply in {session.reply_language or language}.")
+        if session.reply_language:
+            lines.append(f"Reply in {session.reply_language}.")
+        else:
+            lines.append("Reply in the language of the customer's latest message.")
         groups: list[list[Message]] = []
         for turn in session.turns:
             message = Message(
