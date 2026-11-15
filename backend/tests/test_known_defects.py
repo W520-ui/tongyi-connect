@@ -280,6 +280,12 @@ async def test_defect_11_invalid_country_returns_tool_error_to_model(runtime_fac
     ]
     assert len(tool_messages) == 1
     assert "international_shipping" not in tool_messages[0].content
+    tool_result = json.loads(tool_messages[0].content)
+    assert tool_result.get("ok") is False
+    error = tool_result.get("error")
+    assert isinstance(error, dict)
+    assert error.get("code") == "TOOL_VALIDATION_ERROR"
+    assert isinstance(error.get("message"), str) and error["message"]
     assert data["reply"] == "Please confirm the destination country."
 
 
