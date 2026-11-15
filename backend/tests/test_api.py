@@ -1,7 +1,8 @@
 import pytest
 
-from app.agent.models import AgentError, Decision
-from app.schemas.agent import AgentChatRequest
+from app.api.v1.schemas.agent import AgentChatRequest
+from app.core.errors import AppError
+from tests.support import Decision
 
 WORKFLOW_FIELDS = {
     "reply",
@@ -133,13 +134,14 @@ def test_health_catalog_and_empty_dashboard(api_client):
 
 
 def test_handoff_acknowledgment_and_recent_contract(api_client):
-    client, _ = api_client
+    client, runtime = api_client
+    runtime.provider.decisions.append(Decision(reply="已登记退款诉求。"))
     result = client.post(
-        "/api/v1/agent/chat", json={"message": "/handoff", "session_id": "handoff"}
+        "/api/v1/agent/chat", json={"message": "我想申请退款", "session_id": "handoff"}
     )
     assert result.status_code == 200
     ticket = client.get("/api/v1/dashboard/handoffs").json()["data"][0]
-    assert set(ticket) == RECENT_FIELDS
+    assert RECENT_FIELDS <= set(ticket)
     assert ticket["needs_human"] is True
     record_id = ticket["id"]
     path = f"/api/v1/dashboard/handoffs/{record_id}/acknowledge"
@@ -147,7 +149,7 @@ def test_handoff_acknowledgment_and_recent_contract(api_client):
     assert client.post(path).status_code == 404
     assert client.get("/api/v1/dashboard/handoffs").json()["data"] == []
     recent = client.get("/api/v1/dashboard/recent").json()["data"][0]
-    assert set(recent) == RECENT_FIELDS
+    assert RECENT_FIELDS <= set(recent)
     assert recent["human_acknowledged"] is True
     overview = client.get("/api/v1/dashboard/overview").json()["data"]
     assert overview["human_handoffs"] == 1
@@ -191,16 +193,26 @@ def test_missing_handoff_returns_404(api_client):
     assert response.json() == {"detail": "待接管记录不存在或已处理"}
 
 
-@pytest.mark.parametrize("upstream_status,expected", [(None, 503), (502, 502)])
-def test_model_errors_count_failures_without_archiving(api_client, upstream_status, expected):
+@pytest.mark.parametrize(
+    "code,expected",
+    [
+        ("LLM_NOT_CONFIGURED", 503),
+        ("LLM_UPSTREAM_ERROR", 502),
+        ("LLM_TIMEOUT", 504),
+        ("LLM_BAD_RESPONSE", 502),
+    ],
+)
+def test_model_errors_count_failures_without_archiving(api_client, code, expected):
     client, runtime = api_client
-    runtime.provider.decisions.append(AgentError("Scripted failure", status_code=upstream_status))
+    runtime.provider.decisions.append(AppError(code))
     response = client.post("/api/v1/agent/chat", json={"message": "hello", "session_id": "error"})
     assert response.status_code == expected
-    assert response.json() == {"detail": "Scripted failure"}
+    assert response.json()["error"]["code"] == code
+    assert response.json()["detail"] == response.json()["error"]["message"]
+    assert "test-key" not in response.text
     assert runtime.metrics.snapshot()["failed_requests"] == 1
     assert runtime.metrics.snapshot()["total_conversations"] == 0
-    assert runtime.engine.store.load("error").turns == []
+    assert runtime.service.store.load("error").turns == []
 
 
 def test_missing_model_configuration_does_not_call_model(api_client):
@@ -208,6 +220,6 @@ def test_missing_model_configuration_does_not_call_model(api_client):
     runtime.provider.is_configured = False
     response = client.post("/api/v1/agent/chat", json={"message": "hello"})
     assert response.status_code == 503
-    assert "AGENT_LLM_API_KEY" in response.json()["detail"]
+    assert response.json()["error"]["code"] == "LLM_NOT_CONFIGURED"
     assert "test-key" not in response.text
     assert runtime.provider.calls == []

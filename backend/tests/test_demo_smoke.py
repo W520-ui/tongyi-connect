@@ -1,4 +1,5 @@
-from app.agent.models import Decision, ToolCall
+from app.domain.types import ToolCall
+from tests.support import Decision
 from tests.test_api import assert_workflow_contract
 
 
@@ -59,7 +60,9 @@ def test_readme_demo_four_steps(api_client):
     # Step 2: a follow-up resolves the product from the same session.
     followup = send("那它的物流要多久？")
     assert followup["product_id"] == "headset-pro"
-    assert followup["product_confidence"] == 0.72
+    assert followup["product_confidence"] == 0.96
+    assert followup["trace"][0]["name"] == "catalog_shipping"
+    assert followup["trace"][0]["ok"] is True
     followup_prompt = runtime.provider.calls[3]["messages"][0].content
     assert "headset-pro" in followup_prompt
     assert "5–8" in followup["reply"]
@@ -96,6 +99,16 @@ def test_readme_demo_four_steps(api_client):
     assert all(item["session_id"] == "demo-smoke" for item in recent)
     assert client.get("/api/v1/dashboard/handoffs").json()["data"] == []
     assert client.get("/api/v1/health").status_code == 200
-    assert len(runtime.engine.store.load("demo-smoke").turns) == 6
+    assert (
+        len(
+            [
+                turn
+                for turn in runtime.service.store.load("demo-smoke").turns
+                if turn.role == "user" or turn.role == "assistant" and not turn.tool_calls
+            ]
+        )
+        == 6
+    )
+    assert any(turn.role == "tool" for turn in runtime.service.store.load("demo-smoke").turns)
     assert len(runtime.provider.calls) == 7
     assert not runtime.provider.decisions

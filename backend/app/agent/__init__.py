@@ -1,6 +1,4 @@
-"""In-process agent runtime for 通译智联.
+"""In-process agent runner, typed tools, model clients and context construction.
 
-It owns session state, tool execution, command routing and LLM
-orchestration while reusing the cross-border workflow primitives in
-``app.services.workflow``.
+Business services own session persistence and apply effects emitted by the runner.
 """

@@ -1,121 +1,123 @@
-from __future__ import annotations
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-import json
-from typing import Any
-
-from app.agent.models import ToolResult
-from app.agent.registry import ToolRegistry
-from app.services.workflow import PRODUCTS
-
-
-def _json(payload: dict[str, Any]) -> str:
-    return json.dumps(payload, ensure_ascii=False)
+from app.agent.effects import FocusProducts, UpdateSlots
+from app.agent.tools.base import FunctionTool, ToolOutput
+from app.agent.tools.deps import ToolDeps
+from app.agent.tools.outputs import error_output, output, product_data
+from app.domain.countries import COUNTRY_CODES
 
 
-def _public(product: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in product.items() if key != "aliases"}
+class QueryArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    query: str = Field(min_length=1)
 
 
-def _find(product_id: str) -> dict[str, Any] | None:
-    return next((item for item in PRODUCTS if item["id"] == product_id), None)
+class ProductArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    product_id: str = Field(min_length=1)
 
 
-def register(registry: ToolRegistry) -> None:
-    @registry.tool(
-        name="catalog_search",
-        description="按商品名称或关键词检索商品资料库，返回命中的商品列表与 ID",
-        parameters={
-            "type": "object",
-            "properties": {"query": {"type": "string", "description": "商品名称或关键词"}},
-            "required": ["query"],
-        },
-        scopes=("catalog",),
+class ShippingArgs(ProductArgs):
+    destination: str = Field(
+        pattern=r"^[A-Z]{2}$", description="ISO 3166-1 alpha-2 country code, such as ES"
     )
-    async def search(args: dict[str, Any], ctx: Any) -> ToolResult:
-        query = str(args.get("query") or "").strip().lower()
-        if not query:
-            return ToolResult(ok=False, content="缺少 query 参数")
-        matched: list[dict[str, Any]] = []
-        for product in PRODUCTS:
-            haystack = (
-                product["name"].lower(),
-                product["english_name"].lower(),
-                *product["aliases"],
-            )
-            if any(query in token for token in haystack):
-                matched.append(_public(product))
-        return ToolResult(
-            ok=bool(matched),
-            content=_json({"count": len(matched), "products": matched}),
-            data={"matched_products": matched},
-        )
 
-    @registry.tool(
-        name="catalog_quote",
-        description="查询指定商品的参考价格、库存与币种",
-        parameters={
-            "type": "object",
-            "properties": {"product_id": {"type": "string", "description": "商品 ID"}},
-            "required": ["product_id"],
-        },
-        scopes=("catalog",),
+    @field_validator("destination")
+    @classmethod
+    def assigned_country(cls, country: str) -> str:
+        if country not in COUNTRY_CODES:
+            raise ValueError("Destination must be an assigned ISO 3166-1 alpha-2 country code")
+        return country
+
+
+async def search(args: QueryArgs, deps: ToolDeps) -> ToolOutput:
+    products = await deps.catalog.search(args.query)
+    return output(
+        {"count": len(products), "products": [product_data(item) for item in products]},
+        effects=(FocusProducts(tuple(item.id for item in products)),) if products else (),
     )
-    async def quote(args: dict[str, Any], ctx: Any) -> ToolResult:
-        product = _find(str(args.get("product_id") or ""))
-        if product is None:
-            return ToolResult(ok=False, content="未找到该商品，请先用 catalog_search 检索")
-        payload = {
-            "product_id": product["id"],
-            "name": product["name"],
-            "price_usd": product["price_usd"],
+
+
+async def quote(args: ProductArgs, deps: ToolDeps) -> ToolOutput:
+    product = await deps.catalog.get(args.product_id)
+    if product is None:
+        return error_output("PRODUCT_NOT_FOUND", "Product not found; call catalog_search first")
+    return output(
+        {
+            "product_id": product.id,
+            "name": product.name,
+            "price_usd": product.price_usd,
             "currency": "USD",
-            "stock": product["stock"],
-        }
-        return ToolResult(ok=True, content=_json(payload), data=payload)
+            "stock": product.stock,
+        },
+        effects=(FocusProducts((product.id,)),),
+    )
 
-    @registry.tool(
-        name="catalog_shipping",
-        description="查询指定商品发往目的地的常规配送时效",
-        parameters={
-            "type": "object",
-            "properties": {
-                "product_id": {"type": "string", "description": "商品 ID"},
-                "destination": {"type": "string", "description": "目的国家或地区"},
+
+async def shipping(args: ShippingArgs, deps: ToolDeps) -> ToolOutput:
+    product = await deps.catalog.get(args.product_id)
+    if product is None:
+        return error_output("PRODUCT_NOT_FOUND", "Product not found; call catalog_search first")
+    rule = await deps.catalog.shipping_rule(product.id, args.destination)
+    effects = (FocusProducts((product.id,)), UpdateSlots(destination_country=args.destination))
+    if rule is None:
+        return output(
+            {
+                "product_id": product.id,
+                "destination": args.destination,
+                "availability": "unconfirmed",
+                "note": "需商家确认，不得承诺可送达或配送时效",
             },
-            "required": ["product_id"],
+            effects=effects,
+        )
+    return output(
+        {
+            "product_id": product.id,
+            "destination": args.destination,
+            "availability": "available" if rule.available else "unavailable",
+            "international_shipping": rule.available,
+            "shipping_days": rule.days_text,
+            "note": rule.note,
         },
-        scopes=("catalog",),
+        effects=effects,
     )
-    async def shipping(args: dict[str, Any], ctx: Any) -> ToolResult:
-        product = _find(str(args.get("product_id") or ""))
-        if product is None:
-            return ToolResult(ok=False, content="未找到该商品，请先用 catalog_search 检索")
-        destination = str(args.get("destination") or "")
-        payload = {
-            "product_id": product["id"],
-            "destination": destination or "未提供",
-            "shipping_days": product["shipping_days"],
-            "international_shipping": True,
-        }
-        return ToolResult(ok=True, content=_json(payload), data=payload)
 
-    @registry.tool(
-        name="catalog_specs",
-        description="查询指定商品的参数与规格",
-        parameters={
-            "type": "object",
-            "properties": {"product_id": {"type": "string", "description": "商品 ID"}},
-            "required": ["product_id"],
-        },
-        scopes=("catalog",),
+
+async def specs(args: ProductArgs, deps: ToolDeps) -> ToolOutput:
+    product = await deps.catalog.get(args.product_id)
+    if product is None:
+        return error_output("PRODUCT_NOT_FOUND", "Product not found; call catalog_search first")
+    return output(
+        {"product_id": product.id, "name": product.name, "specs": product.specs},
+        effects=(FocusProducts((product.id,)),),
     )
-    async def specs(args: dict[str, Any], ctx: Any) -> ToolResult:
-        product = _find(str(args.get("product_id") or ""))
-        if product is None:
-            return ToolResult(ok=False, content="未找到该商品，请先用 catalog_search 检索")
-        payload = {
-            "product_id": product["id"],
-            "name": product["name"],
-            "specs": product["specs"],
-        }
-        return ToolResult(ok=True, content=_json(payload), data=payload)
+
+
+def catalog_tools(timeout: float) -> tuple[FunctionTool, ...]:
+    return (
+        FunctionTool(
+            "catalog_search",
+            "Search the product catalog by name or keyword",
+            QueryArgs,
+            search,
+            timeout,
+        ),
+        FunctionTool(
+            "catalog_quote",
+            "Look up a product's single USD price and stock",
+            ProductArgs,
+            quote,
+            timeout,
+        ),
+        FunctionTool(
+            "catalog_shipping",
+            "Check verified shipping rules for an ISO country; "
+            "unconfirmed requires merchant approval",
+            ShippingArgs,
+            shipping,
+            timeout,
+        ),
+        FunctionTool(
+            "catalog_specs", "Look up product specifications", ProductArgs, specs, timeout
+        ),
+    )

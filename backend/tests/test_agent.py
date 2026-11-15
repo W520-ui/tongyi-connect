@@ -1,329 +1,259 @@
-from tests import isolation  # noqa: F401 -- isolate database before importing the app
-
-# isort: split
-
-import asyncio
 import json
-import tempfile
-import unittest
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from unittest.mock import patch
 
-from app.agent.commands import CommandRouter
-from app.agent.config import AgentSettings
-from app.agent.engine import AgentEngine
-from app.agent.hooks import Hooks
-from app.agent.models import (
-    AgentContext,
-    AgentError,
-    Decision,
-    Message,
-    Session,
-    ToolCall,
-    Turn,
-)
-from app.agent.providers.openai import _parse_decision
-from app.agent.registry import create_default_registry
-from app.agent.session import SessionStore
-from app.schemas.agent import AgentChatRequest
-from app.services.workflow import WorkflowMetrics, analyze_message
+import pytest
+
+from app.agent.llm.openai import parse_response
+from app.core.errors import AppError
+from app.domain.types import InboundMessage, Message, Session, ToolCall, Turn
+from tests.support import Decision, ScriptedProvider
 
 
-class ScriptedProvider:
-    def __init__(self, decisions):
-        self.decisions = list(decisions)
-        self.calls = []
+async def send(runtime, message, session_id="test-session"):
+    from app.api.v1.presenters import present_workflow
 
-    @property
-    def is_configured(self):
-        return True
-
-    async def decide(self, messages, tools):
-        self.calls.append({"messages": messages, "tools": tools})
-        if not self.decisions:
-            raise AssertionError("scripted decisions exhausted")
-        return self.decisions.pop(0)
+    result = await runtime.service.handle_inbound(InboundMessage(message, session_id))
+    return {"status": "ok", "data": present_workflow(result).model_dump(), "message": None}
 
 
-class UnconfiguredProvider:
-    is_configured = False
-
-    async def decide(self, messages, tools):
-        raise AssertionError("model must not be called without a key")
-
-
-def make_engine(provider, temp_dir):
-    settings = AgentSettings(
-        llm_api_key="test-key",
-        llm_base_url="https://example.test/v1",
-        llm_model="test-model",
-        max_tool_rounds=4,
-        session_ttl_hours=24,
-        max_history_turns=10,
+async def test_tool_calling_loop_returns_model_reply_and_archives(runtime_factory):
+    provider = ScriptedProvider(
+        [
+            Decision(tool_calls=(ToolCall("c1", "catalog_search", {"query": "headphones"}),)),
+            Decision(reply="The headphones cost USD 39.00."),
+        ]
     )
-    root = Path(temp_dir)
-    store = SessionStore(root / "sessions.db")
-    metrics = WorkflowMetrics(root / "workflow.db")
-    engine = AgentEngine(
-        settings=settings,
-        provider=provider,
-        registry=create_default_registry(),
-        store=store,
-        commands=CommandRouter(store),
-        hooks=Hooks(),
-    )
-    return engine, metrics, store
-
-
-def run_engine(engine, metrics, message, session_id="test-session"):
-    with patch("app.agent.engine.metrics", metrics):
-        return asyncio.run(
-            engine.chat(AgentChatRequest(message=message, session_id=session_id, username="tester"))
-        )
-
-
-class AgentEngineTests(unittest.TestCase):
-    def test_tool_calling_loop_returns_model_reply_and_archives(self):
-        provider = ScriptedProvider(
+    runtime = runtime_factory(provider)
+    result = await send(runtime, "Please quote the headphones", "s1")
+    assert result["status"] == "ok"
+    assert result["data"]["reply"] == "The headphones cost USD 39.00."
+    assert result["data"]["source"] == "native"
+    assert result["data"]["matched_product"] == "星云降噪耳机 Pro"
+    assert len(provider.calls) == 2
+    assert "catalog_search" in [item["function"]["name"] for item in provider.calls[0]["tools"]]
+    assert any(message.role == "tool" for message in provider.calls[1]["messages"])
+    assert runtime.metrics.snapshot()["total_conversations"] == 1
+    session = runtime.service.store.load("s1")
+    assert (
+        len(
             [
-                Decision(
-                    tool_calls=(
-                        ToolCall(
-                            id="c1",
-                            name="catalog_search",
-                            arguments={"query": "headphones"},
-                        ),
-                    )
-                ),
-                Decision(reply="The headphones cost USD 39.00."),
+                turn
+                for turn in session.turns
+                if turn.role == "user" or turn.role == "assistant" and not turn.tool_calls
             ]
         )
-        with tempfile.TemporaryDirectory() as temp_dir:
-            engine, metrics, store = make_engine(provider, temp_dir)
-            result = run_engine(engine, metrics, "Please quote the headphones", "s1")
-            data = result["data"]
-            self.assertEqual(result["status"], "ok")
-            self.assertEqual(data["reply"], "The headphones cost USD 39.00.")
-            self.assertEqual(data["source"], "native")
-            self.assertEqual(data["matched_product"], "星云降噪耳机 Pro")
-            self.assertEqual(len(provider.calls), 2)
-            tool_names = [item["function"]["name"] for item in provider.calls[0]["tools"]]
-            self.assertIn("catalog_search", tool_names)
-            self.assertTrue(
-                any(message.role == "tool" for message in provider.calls[1]["messages"])
-            )
-            self.assertEqual(metrics.snapshot()["total_conversations"], 1)
-            session = store.load("s1")
-            self.assertEqual(len(session.turns), 2)
-            self.assertEqual(session.last_product_id, "headset-pro")
-            store.close()
-            metrics.close()
+        == 2
+    )
+    assert any(turn.role == "tool" for turn in session.turns)
+    assert session.last_product_id == "headset-pro"
 
-    def test_after_sales_tool_triggers_human_handoff(self):
-        provider = ScriptedProvider(
+
+async def test_after_sales_tool_triggers_human_handoff(runtime_factory):
+    runtime = runtime_factory(
+        ScriptedProvider(
             [
                 Decision(
-                    tool_calls=(
-                        ToolCall(
-                            id="c1",
-                            name="after_sales_record",
-                            arguments={"issue": "arrived damaged"},
-                        ),
-                    )
+                    tool_calls=(ToolCall("c1", "after_sales_record", {"issue": "arrived damaged"}),)
                 ),
                 Decision(reply="I have recorded your request."),
             ]
         )
-        with tempfile.TemporaryDirectory() as temp_dir:
-            engine, metrics, store = make_engine(provider, temp_dir)
-            result = run_engine(engine, metrics, "The headset arrived damaged.", "s2")
-            self.assertTrue(result["data"]["needs_human"])
-            self.assertEqual(result["data"]["source"], "native+human-handoff")
-            self.assertEqual(metrics.snapshot()["human_handoffs"], 1)
-            store.close()
-            metrics.close()
+    )
+    result = await send(runtime, "The headset arrived damaged.", "s2")
+    assert result["data"]["needs_human"]
+    assert result["data"]["source"] == "native+human-handoff"
+    assert runtime.metrics.snapshot()["human_handoffs"] == 1
 
-    def test_follow_up_reuses_session_product(self):
-        provider = ScriptedProvider(
-            [Decision(reply="First reply."), Decision(reply="Second reply.")]
-        )
-        with tempfile.TemporaryDirectory() as temp_dir:
-            engine, metrics, store = make_engine(provider, temp_dir)
-            run_engine(engine, metrics, "Please quote the headphones", "s3")
-            result = run_engine(engine, metrics, "And how long is the delivery time?", "s3")
-            self.assertEqual(result["data"]["matched_product"], "星云降噪耳机 Pro")
-            self.assertEqual(result["data"]["product_confidence"], 0.72)
-            store.close()
-            metrics.close()
 
-    def test_missing_api_key_raises(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            engine, metrics, store = make_engine(UnconfiguredProvider(), temp_dir)
-            with patch("app.agent.engine.metrics", metrics):
-                with self.assertRaises(AgentError) as context:
-                    asyncio.run(engine.chat(AgentChatRequest(message="hello")))
-            self.assertIn("AGENT_LLM_API_KEY", str(context.exception))
-            self.assertEqual(metrics.snapshot()["total_conversations"], 0)
-            store.close()
-            metrics.close()
+async def test_follow_up_reuses_session_product(runtime_factory):
+    runtime = runtime_factory(
+        ScriptedProvider([Decision(reply="First reply."), Decision(reply="Second reply.")])
+    )
+    await send(runtime, "Please quote the headphones", "s3")
+    result = await send(runtime, "And how long is the delivery time?", "s3")
+    assert result["data"]["matched_product"] == "星云降噪耳机 Pro"
+    assert result["data"]["product_confidence"] == 0.72
 
-    def test_tool_round_limit_raises(self):
-        decisions = [
-            Decision(
-                tool_calls=(
-                    ToolCall(
-                        id=f"c{index}",
-                        name="knowledge_search",
-                        arguments={"query": "x"},
-                    ),
+
+async def test_missing_api_key_raises(runtime_factory):
+    provider = ScriptedProvider()
+    provider.is_configured = False
+    runtime = runtime_factory(provider)
+    with pytest.raises(AppError) as error:
+        await send(runtime, "hello")
+    assert error.value.code == "LLM_NOT_CONFIGURED"
+    assert runtime.metrics.snapshot()["total_conversations"] == 0
+    assert provider.calls == []
+
+
+async def test_tool_round_limit_forces_final_text_reply(runtime_factory):
+    provider = ScriptedProvider(
+        [
+            *[
+                Decision(
+                    tool_calls=(ToolCall(f"c{index}", "catalog_search", {"query": "headphones"}),)
                 )
-            )
-            for index in range(4)
+                for index in range(3)
+            ],
+            Decision(reply="Final answer using the available facts."),
         ]
-        with tempfile.TemporaryDirectory() as temp_dir:
-            engine, metrics, store = make_engine(ScriptedProvider(decisions), temp_dir)
-            with self.assertRaises(AgentError) as context:
-                run_engine(engine, metrics, "hello", "s-round")
-            self.assertIn("轮次", str(context.exception))
-            store.close()
-            metrics.close()
-
-    def test_help_command_bypasses_model(self):
-        provider = ScriptedProvider([])
-        with tempfile.TemporaryDirectory() as temp_dir:
-            engine, metrics, store = make_engine(provider, temp_dir)
-            result = run_engine(engine, metrics, "/help", "s4")
-            self.assertIn("可用指令", result["data"]["reply"])
-            self.assertEqual(len(provider.calls), 0)
-            store.close()
-            metrics.close()
-
-    def test_reset_clears_session_history(self):
-        provider = ScriptedProvider([Decision(reply="hello")])
-        with tempfile.TemporaryDirectory() as temp_dir:
-            engine, metrics, store = make_engine(provider, temp_dir)
-            run_engine(engine, metrics, "Please quote the headphones", "s5")
-            run_engine(engine, metrics, "/reset", "s5")
-            self.assertEqual(store.load("s5").turns, [])
-            store.close()
-            metrics.close()
-
-    def test_lang_command_sets_language(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            engine, metrics, store = make_engine(ScriptedProvider([]), temp_dir)
-            run_engine(engine, metrics, "/lang es-ES", "s6")
-            self.assertEqual(store.load("s6").language, "es-ES")
-            store.close()
-            metrics.close()
-
-    def test_handoff_command_marks_needs_human(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            engine, metrics, store = make_engine(ScriptedProvider([]), temp_dir)
-            result = run_engine(engine, metrics, "/handoff", "s7")
-            self.assertTrue(result["data"]["needs_human"])
-            self.assertEqual(result["data"]["source"], "native+human-handoff")
-            store.close()
-            metrics.close()
+    )
+    runtime = runtime_factory(provider)
+    result = await send(runtime, "Please quote the headphones")
+    assert result["data"]["reply"] == "Final answer using the available facts."
+    assert [call["tool_choice"] for call in provider.calls] == ["auto", "auto", "auto", "none"]
+    assert all(call["tools"] for call in provider.calls)
 
 
-class ToolRegistryTests(unittest.TestCase):
-    def setUp(self):
-        self.registry = create_default_registry()
-        self.ctx = AgentContext(
-            session_id="x",
-            session=Session(session_id="x"),
-            analysis=analyze_message("hi"),
-        )
-
-    def test_schemas_expose_all_builtin_tools(self):
-        names = [item["function"]["name"] for item in self.registry.schemas()]
-        self.assertEqual(len(names), 6)
-        self.assertIn("catalog_quote", names)
-        self.assertIn("after_sales_record", names)
-
-    def test_catalog_quote_returns_price(self):
-        result = asyncio.run(
-            self.registry.invoke("catalog_quote", {"product_id": "headset-pro"}, self.ctx)
-        )
-        self.assertTrue(result.ok)
-        self.assertEqual(result.data["price_usd"], 39.0)
-
-    def test_unknown_tool_raises(self):
-        with self.assertRaises(AgentError):
-            asyncio.run(self.registry.invoke("missing.tool", {}, self.ctx))
+async def test_help_command_bypasses_model(runtime_factory):
+    runtime = runtime_factory()
+    assert "可用指令" in (await send(runtime, "/help"))["data"]["reply"]
+    assert not runtime.provider.calls
 
 
-class ProviderParsingTests(unittest.TestCase):
-    def test_plain_content(self):
-        decision = _parse_decision({"choices": [{"message": {"content": "hello"}}]})
-        self.assertEqual(decision.reply, "hello")
+async def test_reset_clears_session_history(runtime_factory):
+    runtime = runtime_factory(ScriptedProvider([Decision(reply="hello")]))
+    await send(runtime, "Please quote the headphones", "s5")
+    await send(runtime, "/reset", "s5")
+    assert runtime.service.store.load("s5").turns == []
 
-    def test_tool_calls(self):
-        args = json.dumps({"query": "lamp"})
-        body = {
-            "choices": [
-                {
-                    "message": {
-                        "tool_calls": [
-                            {
-                                "id": "c1",
-                                "function": {
-                                    "name": "catalog_search",
-                                    "arguments": args,
-                                },
-                            }
-                        ]
-                    }
+
+async def test_lang_command_sets_language(runtime_factory):
+    runtime = runtime_factory()
+    await send(runtime, "/lang es-ES", "s6")
+    assert runtime.service.store.load("s6").reply_language == "es-ES"
+    assert runtime.metrics.snapshot()["total_conversations"] == 0
+
+
+async def test_handoff_command_marks_needs_human(runtime_factory):
+    runtime = runtime_factory()
+    result = await send(runtime, "/handoff", "s7")
+    assert result["data"]["needs_human"]
+    assert result["data"]["source"] == "native+human-handoff"
+
+
+def test_schemas_expose_configured_builtin_tools(runtime_factory):
+    runtime = runtime_factory()
+    schemas = runtime.service.runner.registry.schemas()
+    names = [item["function"]["name"] for item in schemas]
+    assert len(names) == 5
+    assert "catalog_quote" in names and "after_sales_record" in names
+    assert "knowledge_search" not in names
+
+
+async def test_catalog_quote_returns_price(runtime_factory):
+    runtime = runtime_factory()
+    result = await runtime.service.runner.registry.invoke(
+        "catalog_quote", {"product_id": "headset-pro"}, runtime.service.tool_deps
+    )
+    assert result.ok
+    assert json.loads(result.content)["price_usd"] == 39.0
+
+
+async def test_unknown_tool_returns_failure(runtime_factory):
+    runtime = runtime_factory()
+    result = await runtime.service.runner.registry.invoke(
+        "missing_tool", {}, runtime.service.tool_deps
+    )
+    assert not result.ok
+    assert json.loads(result.content)["error"]["code"] == "UNKNOWN_TOOL"
+
+
+def test_plain_content():
+    assert parse_response({"choices": [{"message": {"content": "hello"}}]}).content == "hello"
+
+
+def test_tool_calls():
+    body = {
+        "choices": [
+            {
+                "message": {
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "function": {
+                                "name": "catalog_search",
+                                "arguments": json.dumps({"query": "lamp"}),
+                            },
+                        },
+                    ]
                 }
-            ]
-        }
-        decision = _parse_decision(body)
-        self.assertEqual(decision.tool_calls[0].name, "catalog_search")
-        self.assertEqual(decision.tool_calls[0].arguments, {"query": "lamp"})
-
-    def test_empty_choices_raises(self):
-        with self.assertRaises(AgentError):
-            _parse_decision({"choices": []})
-
-    def test_message_serialization(self):
-        assistant = Message(
-            role="assistant",
-            tool_calls=(
-                {
-                    "id": "c1",
-                    "type": "function",
-                    "function": {"name": "x", "arguments": "{}"},
-                },
-            ),
-        )
-        self.assertIn("tool_calls", assistant.to_openai())
-        tool = Message(role="tool", content="{}", tool_call_id="c1", name="x")
-        self.assertEqual(tool.to_openai()["tool_call_id"], "c1")
+            }
+        ]
+    }
+    response = parse_response(body)
+    assert response.tool_calls[0].name == "catalog_search"
+    assert json.loads(response.tool_calls[0].arguments) == {"query": "lamp"}
 
 
-class SessionStoreTests(unittest.TestCase):
-    def test_ttl_expires_session(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            store = SessionStore(Path(temp_dir) / "sessions.db")
-            session = store.load("s", 24)
-            store.append(
-                session,
-                Turn(
-                    role="user",
-                    content="hi",
-                    created_at=datetime.now(UTC).isoformat(),
-                ),
-            )
-            expired = (datetime.now(UTC) - timedelta(hours=48)).isoformat()
-            store.connection.execute(
-                "UPDATE agent_sessions SET updated_at = ? WHERE session_id = ?",
-                (expired, "s"),
-            )
-            store.connection.commit()
-            self.assertEqual(store.load("s", 24).turns, [])
-            store.close()
+def test_empty_choices_raises():
+    with pytest.raises(AppError, match="响应无法解析"):
+        parse_response({"choices": []})
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_message_serialization():
+    assistant = Message(
+        role="assistant",
+        tool_calls=(
+            {"id": "c1", "type": "function", "function": {"name": "x", "arguments": "{}"}},
+        ),
+    )
+    assert "tool_calls" in assistant.to_openai()
+    assert (
+        Message(role="tool", content="{}", tool_call_id="c1", name="x").to_openai()["tool_call_id"]
+        == "c1"
+    )
+
+
+def test_ttl_expires_session(runtime_factory):
+    runtime = runtime_factory()
+    store = runtime.service.store
+    session = Session("s")
+    store.append(session, Turn("user", "hi", datetime.now(UTC).isoformat()))
+    store.connection.execute(
+        "UPDATE agent_sessions SET updated_at=? WHERE session_id=?",
+        ((datetime.now(UTC) - timedelta(hours=48)).isoformat(), "s"),
+    )
+    store.connection.commit()
+    assert store.load("s", 24).turns == []
+
+
+@pytest.mark.parametrize("corrupt_turns", ["{broken", "null", "[1]", '[{"unexpected": 1}]'])
+def test_corrupt_legacy_history_keeps_session_preferences(runtime_factory, corrupt_turns):
+    store = runtime_factory().service.store
+    store.save(Session("legacy", focused_product_ids=("headset-pro",), reply_language="es-ES"))
+    store.connection.execute(
+        "UPDATE agent_sessions SET turns=? WHERE session_id=?", (corrupt_turns, "legacy")
+    )
+    store.connection.commit()
+    loaded = store.load("legacy")
+    assert loaded.turns == []
+    assert loaded.focused_product_ids == ("headset-pro",)
+    assert loaded.reply_language == "es-ES"
+
+
+@pytest.mark.parametrize("corrupt_focus", ["{broken", '"headset-pro"', "[1]"])
+def test_corrupt_focus_recovers_legacy_product(runtime_factory, corrupt_focus):
+    store = runtime_factory().service.store
+    store.save(Session("legacy", focused_product_ids=("headset-pro",)))
+    store.connection.execute(
+        "UPDATE agent_sessions SET focused_product_ids=? WHERE session_id=?",
+        (corrupt_focus, "legacy"),
+    )
+    store.connection.commit()
+    assert store.load("legacy").focused_product_ids == ("headset-pro",)
+
+
+async def test_unexpected_service_failure_is_persisted_and_redacted(runtime_factory, monkeypatch):
+    runtime = runtime_factory()
+
+    def fail(*_args):
+        raise RuntimeError("PRIVATE-SERVICE-DETAIL")
+
+    monkeypatch.setattr(runtime.service.store, "load", fail)
+    with pytest.raises(AppError) as error:
+        await send(runtime, "Hello")
+    assert error.value.code == "INTERNAL_ERROR"
+    assert "PRIVATE-SERVICE-DETAIL" not in str(error.value)
+    snapshot = runtime.metrics.snapshot()
+    assert snapshot["failed_requests"] == 1 and snapshot["total_conversations"] == 0

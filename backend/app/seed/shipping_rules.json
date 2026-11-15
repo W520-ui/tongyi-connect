@@ -1,0 +1,23 @@
+[
+  {
+    "product_id": "headset-pro",
+    "destination_country": "ES",
+    "available": true,
+    "days_text": "5–8 个工作日",
+    "note": "Demo only; TODO(owner): confirm actual shipping coverage."
+  },
+  {
+    "product_id": "lamp-mini",
+    "destination_country": "ES",
+    "available": true,
+    "days_text": "6–10 个工作日",
+    "note": "Demo only; TODO(owner): confirm actual shipping coverage."
+  },
+  {
+    "product_id": "bottle-lite",
+    "destination_country": "ES",
+    "available": true,
+    "days_text": "7–12 个工作日",
+    "note": "Demo only; TODO(owner): confirm actual shipping coverage."
+  }
+]

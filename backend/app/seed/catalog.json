@@ -1,0 +1,66 @@
+[
+  {
+    "id": "headset-pro",
+    "name": "星云降噪耳机 Pro",
+    "english_name": "Nebula ANC Headphones Pro",
+    "category": "3C 数码",
+    "price_usd": 39.0,
+    "stock": 268,
+    "shipping_days": "5–8 个工作日",
+    "aliases": [
+      "耳机",
+      "降噪",
+      "headphone",
+      "headphones",
+      "anc"
+    ],
+    "specs": {
+      "续航": "40 小时",
+      "蓝牙": "5.3",
+      "重量": "248g",
+      "颜色": "曜石黑、云雾白"
+    }
+  },
+  {
+    "id": "lamp-mini",
+    "name": "光屿便携氛围灯",
+    "english_name": "Luma Portable Ambient Lamp",
+    "category": "家居用品",
+    "price_usd": 24.0,
+    "stock": 154,
+    "shipping_days": "6–10 个工作日",
+    "aliases": [
+      "氛围灯",
+      "灯",
+      "lamp",
+      "light"
+    ],
+    "specs": {
+      "续航": "18 小时",
+      "充电": "USB-C",
+      "重量": "390g",
+      "防护": "IPX4"
+    }
+  },
+  {
+    "id": "bottle-lite",
+    "name": "澄野保温杯 Lite",
+    "english_name": "Clearfield Insulated Bottle Lite",
+    "category": "生活方式",
+    "price_usd": 18.0,
+    "stock": 412,
+    "shipping_days": "7–12 个工作日",
+    "aliases": [
+      "保温杯",
+      "水杯",
+      "bottle",
+      "mug"
+    ],
+    "specs": {
+      "容量": "500ml",
+      "材质": "304 不锈钢",
+      "保温": "12 小时",
+      "重量": "285g"
+    }
+  }
+]

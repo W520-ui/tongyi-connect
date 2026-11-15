@@ -1,42 +1,41 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.services.workflow import list_products, metrics
+from app.api.deps import get_analytics, get_catalog, get_handoffs
+from app.api.v1.schemas.agent import ProductSchema
+from app.api.v1.schemas.workflow import Acknowledgment, DashboardOverview, Envelope, RecentInquiry
+from app.services.analytics import AnalyticsService
+from app.services.catalog import CatalogService
+from app.services.handoff import HandoffService
 
 router = APIRouter(tags=["Workflow"])
 
 
-@router.get("/catalog/products")
-async def catalog_products() -> dict:
-    """Return the demo product knowledge base used by the service agent."""
-
-    return {"status": "ok", "data": list_products()}
+@router.get("/catalog/products", response_model=Envelope[list[ProductSchema]])
+async def catalog_products(catalog: CatalogService = Depends(get_catalog)):
+    return Envelope(data=[ProductSchema.model_validate(product) for product in catalog.products])
 
 
-@router.get("/dashboard/overview")
-async def dashboard_overview() -> dict:
-    """Return persisted counters for the merchant dashboard."""
-
-    return {"status": "ok", "data": metrics.snapshot()}
+@router.get("/dashboard/overview", response_model=Envelope[DashboardOverview])
+async def dashboard_overview(analytics: AnalyticsService = Depends(get_analytics)):
+    return Envelope(data=DashboardOverview(**analytics.snapshot()))
 
 
-@router.get("/dashboard/recent")
-async def dashboard_recent(limit: int = Query(default=8, ge=1, le=20)) -> dict:
-    """Return compact recent summaries for the merchant archive panel."""
+@router.get("/dashboard/recent", response_model=Envelope[list[RecentInquiry]])
+async def dashboard_recent(
+    limit: int = Query(default=8, ge=1, le=20), analytics: AnalyticsService = Depends(get_analytics)
+):
+    return Envelope(data=[RecentInquiry(**record) for record in analytics.recent(limit)])
 
-    return {"status": "ok", "data": metrics.recent_archive(limit)}
 
-
-@router.post("/dashboard/handoffs/{record_id}/acknowledge")
-async def acknowledge_handoff(record_id: str) -> dict:
-    """Record that a merchant has accepted a handoff for follow-up."""
-
-    if not metrics.acknowledge_handoff(record_id):
+@router.post("/dashboard/handoffs/{record_id}/acknowledge", response_model=Envelope[Acknowledgment])
+async def acknowledge_handoff(record_id: str, handoffs: HandoffService = Depends(get_handoffs)):
+    if not handoffs.acknowledge(record_id):
         raise HTTPException(status_code=404, detail="待接管记录不存在或已处理")
-    return {"status": "ok", "data": {"record_id": record_id}}
+    return Envelope(data=Acknowledgment(record_id=record_id))
 
 
-@router.get("/dashboard/handoffs")
-async def dashboard_handoffs(limit: int = Query(default=20, ge=1, le=50)) -> dict:
-    """Return unresolved conversations that require a merchant follow-up."""
-
-    return {"status": "ok", "data": metrics.recent_handoffs(limit)}
+@router.get("/dashboard/handoffs", response_model=Envelope[list[RecentInquiry]])
+async def dashboard_handoffs(
+    limit: int = Query(default=20, ge=1, le=50), handoffs: HandoffService = Depends(get_handoffs)
+):
+    return Envelope(data=[RecentInquiry(**record) for record in handoffs.pending(limit)])

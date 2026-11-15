@@ -1,15 +1,16 @@
-"""Desired behavior for defects 1–12; phase 0 intentionally keeps these red."""
+"""Defects 1–11 must pass; only phase-2 post-analysis remains expected to fail."""
 
 import asyncio
 import json
 
 import pytest
 
-from app.agent.models import AgentContext, Decision, Session, ToolCall
-from app.agent.registry import create_default_registry
-from app.schemas.agent import AgentChatRequest
-from app.services.workflow import WorkflowMetrics, analyze_message
-from tests.support import ScriptedProvider
+from app.agent.guardrails import analyze_message
+from app.api.v1.presenters import present_workflow
+from app.domain.types import InboundMessage, ToolCall
+from app.repositories.archive import WorkflowArchive
+from app.services.analytics import AnalyticsService
+from tests.support import Decision, ScriptedProvider
 
 
 def defect(number, *, phase=1):
@@ -21,12 +22,10 @@ def defect(number, *, phase=1):
 
 
 async def send(runtime, message, session_id="regression"):
-    return (await runtime.engine.chat(AgentChatRequest(message=message, session_id=session_id)))[
-        "data"
-    ]
+    result = await runtime.service.handle_inbound(InboundMessage(message, session_id))
+    return present_workflow(result).model_dump()
 
 
-@defect(1)
 @pytest.mark.parametrize(
     "message,property_name,expected",
     [
@@ -40,9 +39,9 @@ async def send(runtime, message, session_id="regression"):
     ],
 )
 def test_defect_01_substrings_do_not_change_business_classification(
-    message, property_name, expected
+    message, property_name, expected, catalog
 ):
-    assert getattr(analyze_message(message), property_name) == expected
+    assert getattr(analyze_message(message, catalog.products), property_name) == expected
 
 
 @pytest.mark.parametrize(
@@ -55,13 +54,12 @@ def test_defect_01_substrings_do_not_change_business_classification(
         ("请用英文回复：耳机多少钱？", "language", "en-US"),
     ],
 )
-def test_defect_01_true_positives_are_preserved(message, field, expected):
-    analysis = analyze_message(message)
-    actual = analysis.product["id"] if field == "product_id" else getattr(analysis, field)
+def test_defect_01_true_positives_are_preserved(message, field, expected, catalog):
+    analysis = analyze_message(message, catalog.products)
+    actual = analysis.product.id if field == "product_id" else getattr(analysis, field)
     assert actual == expected
 
 
-@defect(2)
 async def test_defect_02_reset_clears_product_and_archive_fallback(runtime_factory):
     runtime = runtime_factory(
         ScriptedProvider([Decision(reply="Quote"), Decision(reply="Which product?")])
@@ -73,10 +71,9 @@ async def test_defect_02_reset_clears_product_and_archive_fallback(runtime_facto
     assert "headset-pro" not in product["reply"]
     assert "星云降噪耳机" not in product["reply"]
     assert followup["product_id"] is None
-    assert runtime.engine.store.load("regression").last_product_id is None
+    assert runtime.service.store.load("regression").last_product_id is None
 
 
-@defect(3)
 async def test_defect_03_explicit_language_survives_customer_language_change(runtime_factory):
     runtime = runtime_factory(
         ScriptedProvider([Decision(reply="Primera respuesta"), Decision(reply="Segunda respuesta")])
@@ -84,15 +81,14 @@ async def test_defect_03_explicit_language_survives_customer_language_change(run
     await send(runtime, "/lang es-ES")
     await send(runtime, "Hello, tell me more.")
     await send(runtime, "And what else?")
-    assert runtime.engine.store.load("regression").language == "es-ES"
+    assert runtime.service.store.load("regression").language == "es-ES"
     assert "es-ES" in runtime.provider.calls[-1]["messages"][0].content
 
 
-@defect(3)
 async def test_defect_03_invalid_language_is_rejected(runtime_factory):
     runtime = runtime_factory()
     result = await send(runtime, "/lang foo")
-    assert runtime.engine.store.load("regression").language != "foo"
+    assert runtime.service.store.load("regression").language != "foo"
     assert all(language in result["reply"] for language in ("zh-CN", "en-US", "es-ES"))
 
 
@@ -105,14 +101,12 @@ async def command_sequence(runtime):
     await send(runtime, "Third real inquiry")
 
 
-@defect(4)
 async def test_defect_04_commands_do_not_increment_consultation_counts(runtime_factory):
     runtime = runtime_factory(ScriptedProvider([Decision(reply="Answer") for _ in range(3)]))
     await command_sequence(runtime)
     assert runtime.metrics.snapshot()["total_conversations"] == 3
 
 
-@defect(4)
 async def test_defect_04_commands_and_their_replies_are_absent_from_model_history(runtime_factory):
     runtime = runtime_factory(ScriptedProvider([Decision(reply="Answer") for _ in range(3)]))
     await command_sequence(runtime)
@@ -126,14 +120,12 @@ async def test_defect_04_commands_and_their_replies_are_absent_from_model_histor
     ]
 
 
-@defect(5)
 async def test_defect_05_handoff_preserves_user_request_reason(runtime_factory):
     runtime = runtime_factory()
     await send(runtime, "/handoff")
-    assert runtime.metrics.recent_handoffs()[0]["handoff_reason"] == "用户主动请求人工接管"
+    assert runtime.handoffs.pending()[0]["handoff_reason"] == "用户主动请求人工接管"
 
 
-@defect(6)
 async def test_defect_06_anonymous_requests_receive_independent_session_ids(runtime_factory):
     runtime = runtime_factory(ScriptedProvider([Decision(reply="One"), Decision(reply="Two")]))
     first = await send(runtime, "FIRST-ANONYMOUS-MARKER", None)
@@ -145,7 +137,6 @@ async def test_defect_06_anonymous_requests_receive_independent_session_ids(runt
     assert first["session_id"] != second["session_id"]
 
 
-@defect(7)
 async def test_defect_07_concurrent_inbound_messages_are_all_saved_in_order(runtime_factory):
     runtime = runtime_factory(
         ScriptedProvider(
@@ -153,7 +144,7 @@ async def test_defect_07_concurrent_inbound_messages_are_all_saved_in_order(runt
         )
     )
     await asyncio.gather(send(runtime, "First inquiry"), send(runtime, "Second inquiry"))
-    turns = runtime.engine.store.load("regression").turns
+    turns = runtime.service.store.load("regression").turns
     assert [(turn.role, turn.content) for turn in turns] == [
         ("user", "First inquiry"),
         ("assistant", "First reply"),
@@ -162,13 +153,12 @@ async def test_defect_07_concurrent_inbound_messages_are_all_saved_in_order(runt
     ]
 
 
-@defect(8)
 async def test_defect_08_statistics_are_consistent_between_instances(runtime_factory):
     runtime = runtime_factory(ScriptedProvider([Decision(reply="Recorded your request.")]))
-    second = WorkflowMetrics(runtime.metrics.db_path)
+    second = WorkflowArchive(runtime.archive.db_path)
     try:
         await send(runtime, "I want a refund")
-        snapshot = second.snapshot()
+        snapshot = AnalyticsService(second).snapshot()
         assert {
             key: snapshot[key]
             for key in ("total_conversations", "human_handoffs", "pending_handoffs")
@@ -181,7 +171,6 @@ async def test_defect_08_statistics_are_consistent_between_instances(runtime_fac
         second.close()
 
 
-@defect(9)
 @pytest.mark.parametrize("observable", ["database", "merchant_queue"])
 async def test_defect_09_after_sales_issue_is_persisted_and_visible(runtime_factory, observable):
     issue = "ISSUE-MARKER screen cracked on arrival"
@@ -195,13 +184,12 @@ async def test_defect_09_after_sales_issue_is_persisted_and_visible(runtime_fact
     await send(runtime, "Please ask the merchant to help.")
     assert len(provider.calls) == 2
     if observable == "database":
-        row = runtime.metrics.connection.execute("SELECT * FROM workflow_conversations").fetchone()
+        row = runtime.archive.connection.execute("SELECT * FROM workflow_conversations").fetchone()
         assert dict(row).get("issue_summary") == issue
     else:
-        assert issue in json.dumps(runtime.metrics.recent_handoffs()[0], ensure_ascii=False)
+        assert issue in json.dumps(runtime.handoffs.pending()[0], ensure_ascii=False)
 
 
-@defect(10)
 @pytest.mark.parametrize("observable", ["card", "steps", "session"])
 async def test_defect_10_tool_results_drive_cards_and_product_memory(runtime_factory, observable):
     provider = ScriptedProvider(
@@ -224,20 +212,15 @@ async def test_defect_10_tool_results_drive_cards_and_product_memory(runtime_fac
         assert "catalog_search" in steps and "catalog_quote" in steps
         assert steps.index("catalog_search") < steps.index("catalog_quote")
     else:
-        assert runtime.engine.store.load("regression").last_product_id == "headset-pro"
+        assert runtime.service.store.load("regression").last_product_id == "headset-pro"
 
 
-def shipping_context():
-    return AgentContext(
-        session_id="shipping", session=Session("shipping"), analysis=analyze_message("hi")
-    )
-
-
-async def test_defect_11_known_spain_shipping_remains_available():
-    result = await create_default_registry().invoke(
+async def test_defect_11_known_spain_shipping_remains_available(runtime_factory):
+    runtime = runtime_factory()
+    result = await runtime.service.runner.registry.invoke(
         "catalog_shipping",
         {"product_id": "headset-pro", "destination": "ES"},
-        shipping_context(),
+        runtime.service.tool_deps,
     )
     payload = json.loads(result.content)
     assert result.ok
@@ -245,19 +228,19 @@ async def test_defect_11_known_spain_shipping_remains_available():
     assert payload["shipping_days"] == "5–8 个工作日"
 
 
-@defect(11)
-async def test_defect_11_unconfirmed_destination_does_not_claim_delivery():
-    result = await create_default_registry().invoke(
+async def test_defect_11_unconfirmed_destination_does_not_claim_delivery(runtime_factory):
+    runtime = runtime_factory()
+    result = await runtime.service.runner.registry.invoke(
         "catalog_shipping",
         {"product_id": "headset-pro", "destination": "AQ"},
-        shipping_context(),
+        runtime.service.tool_deps,
     )
     payload = json.loads(result.content)
+    assert result.ok
     assert payload.get("availability") == "unconfirmed"
     assert payload.get("international_shipping") is not True
 
 
-@defect(11)
 async def test_defect_11_invalid_country_returns_tool_error_to_model(runtime_factory):
     provider = ScriptedProvider(
         [
@@ -286,6 +269,9 @@ async def test_defect_11_invalid_country_returns_tool_error_to_model(runtime_fac
     assert isinstance(error, dict)
     assert error.get("code") == "TOOL_VALIDATION_ERROR"
     assert isinstance(error.get("message"), str) and error["message"]
+    assert runtime.archive.recent()[0]["tool_trace"]
+    assert data["trace"][0]["ok"] is False
+    assert data["trace"][0]["error"]
     assert data["reply"] == "Please confirm the destination country."
 
 

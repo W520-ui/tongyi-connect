@@ -37,9 +37,5 @@ venv/
 htmlcov/
 backend/data/
 
-# AstrBot runtime files
-astrbot/data/
-astrbot/*.log
-astrbot/*.whl
-astrbot/astrbot.lock
-astrbot/.astrbot
+# Generated backend API schema
+backend/openapi.json
