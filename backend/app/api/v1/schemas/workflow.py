@@ -45,6 +45,7 @@ class RecentInquiry(BaseModel):
     id: str
     created_at: str
     session_id: str
+    conversation_id: str
     message: str
     reply: str
     merchant_summary: str

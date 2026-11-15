@@ -40,4 +40,11 @@ def present_workflow(result: WorkflowResult) -> AgentWorkflowData:
         source=result.source,
         session_id=result.session_id,
         trace=[ToolTraceSchema.model_validate(entry) for entry in result.trace.calls],
+        conversation_id=result.session_id,
+        message_id=result.message_id,
+        client_message_id=result.client_message_id,
+        run_id=result.run_id,
+        replayed=result.replayed,
+        conversation_status=result.conversation_status,
+        analysis_source=result.analysis_source,
     )

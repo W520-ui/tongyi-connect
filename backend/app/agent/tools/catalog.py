@@ -17,6 +17,10 @@ class ProductArgs(BaseModel):
     product_id: str = Field(min_length=1)
 
 
+class QuoteArgs(ProductArgs):
+    quantity: int | None = Field(default=None, ge=1)
+
+
 class ShippingArgs(ProductArgs):
     destination: str = Field(
         pattern=r"^[A-Z]{2}$", description="ISO 3166-1 alpha-2 country code, such as ES"
@@ -38,7 +42,7 @@ async def search(args: QueryArgs, deps: ToolDeps) -> ToolOutput:
     )
 
 
-async def quote(args: ProductArgs, deps: ToolDeps) -> ToolOutput:
+async def quote(args: QuoteArgs, deps: ToolDeps) -> ToolOutput:
     product = await deps.catalog.get(args.product_id)
     if product is None:
         return error_output("PRODUCT_NOT_FOUND", "Product not found; call catalog_search first")
@@ -50,7 +54,7 @@ async def quote(args: ProductArgs, deps: ToolDeps) -> ToolOutput:
             "currency": "USD",
             "stock": product.stock,
         },
-        effects=(FocusProducts((product.id,)),),
+        effects=(FocusProducts((product.id,)), UpdateSlots(quantity=args.quantity)),
     )
 
 
@@ -105,7 +109,7 @@ def catalog_tools(timeout: float) -> tuple[FunctionTool, ...]:
         FunctionTool(
             "catalog_quote",
             "Look up a product's single USD price and stock",
-            ProductArgs,
+            QuoteArgs,
             quote,
             timeout,
         ),

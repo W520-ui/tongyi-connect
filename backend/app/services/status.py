@@ -1,17 +1,17 @@
 from app.agent.llm.base import LLMClient
 from app.core.config import Settings
-from app.repositories.archive import WorkflowArchive
+from app.core.db import Database
 
 
 class StatusService:
-    def __init__(self, settings: Settings, client: LLMClient, archive: WorkflowArchive) -> None:
-        self.settings, self.client, self.archive = settings, client, archive
+    def __init__(self, settings: Settings, llm: LLMClient, database: Database):
+        self.settings, self.llm, self.database = settings, llm, database
 
-    def snapshot(self) -> dict:
-        configured = self.client.is_configured
+    async def snapshot(self):
+        configured = self.llm.is_configured
         return {
             "version": self.settings.app_version,
             "llm_configured": configured,
             "model": self.settings.llm_model if configured else None,
-            "db_ok": self.archive.ping(),
+            "db_ok": await self.database.ping(),
         }

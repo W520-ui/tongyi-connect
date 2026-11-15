@@ -6,18 +6,21 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.agent.analysis import PostAnalyzer
 from app.agent.context import ContextBuilder
 from app.agent.llm.base import LLMClient
 from app.agent.llm.openai import OpenAICompatibleClient
 from app.agent.registry import create_default_registry
 from app.agent.runtime import AgentRunner
 from app.api.router import api_router
+from app.core.background import BackgroundTasks
 from app.core.config import Settings
+from app.core.db import Database
 from app.core.errors import AppError
 from app.core.locks import LocalConversationLocks
 from app.core.logging import configure_logging
-from app.repositories.archive import WorkflowArchive
-from app.repositories.session import SessionStore
+from app.repositories.conversations import ConversationRepository
+from app.repositories.seed import seed_missing
 from app.services.analytics import AnalyticsService
 from app.services.catalog import CatalogService
 from app.services.conversation import ConversationService
@@ -25,7 +28,12 @@ from app.services.handoff import HandoffService
 from app.services.status import StatusService
 
 
-def create_app(settings: Settings | None = None, *, llm_client: LLMClient | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    llm_client: LLMClient | None = None,
+    analysis_client: LLMClient | None = None,
+) -> FastAPI:
     settings = settings if settings is not None else Settings()
 
     @asynccontextmanager
@@ -36,44 +44,67 @@ def create_app(settings: Settings | None = None, *, llm_client: LLMClient | None
         )
         async with AsyncExitStack() as resources:
             client = await resources.enter_async_context(httpx.AsyncClient())
-            archive = WorkflowArchive(settings.workflow_db_path)
-            resources.callback(archive.close)
-            store = SessionStore(settings.workflow_db_path)
-            resources.callback(store.close)
-            catalog = CatalogService.load_seed()
+            database = Database(settings.database_url)
+            resources.push_async_callback(database.close)
+            await database.migrate()
+            await seed_missing(database)
+            store = ConversationRepository(database, settings.merchant_id)
+            catalog = CatalogService(database, settings.merchant_id)
             llm = llm_client if llm_client is not None else OpenAICompatibleClient(settings, client)
+            analysis_settings = settings.model_copy(
+                update={"llm_model": settings.analysis_model or settings.llm_model}
+            )
+            analysis_llm = (
+                analysis_client
+                if analysis_client is not None
+                else (
+                    llm_client
+                    if llm_client is not None
+                    else OpenAICompatibleClient(analysis_settings, client)
+                )
+            )
             runner = AgentRunner(
                 settings, llm, create_default_registry(settings.tool_timeout_seconds)
             )
             context = ContextBuilder(
-                files("app.agent.prompts").joinpath("system_v1.txt").read_text(encoding="utf-8"),
+                files("app.agent.prompts").joinpath("system_v2.txt").read_text(encoding="utf-8"),
                 catalog,
-                settings.max_history_turns,
+                settings.context_token_budget,
+                settings.tool_result_max_chars,
             )
-            analytics, handoffs = AnalyticsService(archive), HandoffService(archive)
+            analytics = AnalyticsService(database, settings.merchant_id)
+            handoffs = HandoffService(database, store, settings.merchant_id)
+            background = BackgroundTasks()
+            resources.push_async_callback(background.close)
+            analyzer = PostAnalyzer(
+                analysis_llm, settings.analysis_enabled, settings.analysis_timeout_seconds
+            )
             service = ConversationService(
                 settings,
                 runner,
                 context,
                 store,
-                archive,
                 catalog,
                 analytics,
                 handoffs,
                 LocalConversationLocks(),
+                analyzer,
+                background,
             )
             for name, value in {
                 "settings": settings,
                 "http_client": client,
-                "archive": archive,
-                "session_store": store,
+                "database": database,
+                "conversations": store,
                 "catalog": catalog,
                 "llm": llm,
                 "runner": runner,
                 "analytics": analytics,
                 "handoffs": handoffs,
                 "conversation_service": service,
-                "status": StatusService(settings, llm, archive),
+                "background": background,
+                "analyzer": analyzer,
+                "status": StatusService(settings, llm, database),
             }.items():
                 setattr(application.state, name, value)
             yield
@@ -111,12 +142,12 @@ def create_app(settings: Settings | None = None, *, llm_client: LLMClient | None
 
 
 class LazyApplication:
-    """Keep app.main:app compatible with the existing launcher without import-time settings I/O."""
+    """Preserve the launcher while allocating no resources at import time."""
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.application: FastAPI | None = None
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(self, scope, receive, send):
         if self.application is None:
             self.application = create_app()
         await self.application(scope, receive, send)

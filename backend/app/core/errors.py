@@ -1,4 +1,7 @@
 ERRORS = {
+    "CONVERSATION_NOT_FOUND": (404, "会话不存在或已过期"),
+    "HANDOFF_NOT_FOUND": (404, "工单不存在"),
+    "INVALID_STATE": (409, "当前状态不允许这个操作"),
     "LLM_NOT_CONFIGURED": (503, "后端尚未配置模型密钥，无法生成回复"),
     "LLM_TIMEOUT": (504, "模型请求超时，请稍后重试"),
     "AGENT_RUN_TIMEOUT": (504, "智能体处理超时，请稍后重试"),
@@ -14,4 +17,10 @@ class AppError(Exception):
         self.code = code
         self.status_code, default_message = ERRORS[code]
         self.message = message or default_message
+        self.recorded = False
         super().__init__(self.message)
+
+
+class UnsupportedResponseFormat(AppError):
+    def __init__(self) -> None:
+        super().__init__("LLM_UPSTREAM_ERROR")

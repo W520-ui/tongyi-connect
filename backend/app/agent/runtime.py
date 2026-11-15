@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any
 
@@ -39,6 +39,14 @@ def trace_args(arguments: Any) -> dict[str, Any]:
         return parsed if isinstance(parsed, dict) else {}
     except (ValueError, TypeError):
         return {}
+
+
+@dataclass
+class RunProgress:
+    rounds: int = 0
+    entries: list[ToolTraceEntry] = field(default_factory=list)
+    usage: Usage | None = None
+    truncated: bool = False
 
 
 class AgentRunner:
@@ -124,32 +132,44 @@ class AgentRunner:
             await asyncio.gather(task, return_exceptions=True)
 
     async def run(self, ctx: RunContext) -> AsyncIterator[AgentEvent]:
+        progress = RunProgress()
+
+        def failed(error):
+            return RunFailed(
+                error.code,
+                error.message,
+                RunTrace(tuple(progress.entries), progress.truncated),
+                progress.usage,
+                progress.rounds,
+            )
+
         try:
             async with asyncio.timeout(self.settings.run_timeout_seconds):
-                async for event in self._run(ctx):
+                async for event in self._run(ctx, progress):
                     yield event
         except TimeoutError:
             error = AppError("AGENT_RUN_TIMEOUT")
-            yield RunFailed(error.code, error.message)
+            yield failed(error)
         except AppError as error:
-            yield RunFailed(error.code, error.message)
+            yield failed(error)
         except Exception:
             logger.exception("Agent run failed")
             error = AppError("INTERNAL_ERROR")
-            yield RunFailed(error.code, error.message)
+            yield failed(error)
 
-    async def _run(self, ctx: RunContext) -> AsyncIterator[AgentEvent]:
+    async def _run(self, ctx: RunContext, progress: RunProgress) -> AsyncIterator[AgentEvent]:
         if not self.client.is_configured:
             raise AppError("LLM_NOT_CONFIGURED")
         messages = list(ctx.messages)
         initial_count = len(messages)
         effects: list[Effect] = []
-        entries: list[ToolTraceEntry] = []
+        entries = progress.entries
         prompt_tokens = completion_tokens = 0
         has_usage = truncated = False
         tools = self.registry.schemas()
 
         for round_number in range(self.settings.max_tool_rounds):
+            progress.rounds = round_number + 1
             final_round = round_number == self.settings.max_tool_rounds - 1
             choice = "none" if final_round else "auto"
             if ctx.streaming:
@@ -167,8 +187,10 @@ class AgentRunner:
                 has_usage = True
                 prompt_tokens += response.usage.prompt_tokens
                 completion_tokens += response.usage.completion_tokens
+                progress.usage = Usage(prompt_tokens, completion_tokens)
             if response.finish_reason == "length":
                 truncated = True
+                progress.truncated = True
                 logger.warning("LLM response truncated in round=%s", round_number)
             if not response.tool_calls:
                 if not response.content or not response.content.strip():

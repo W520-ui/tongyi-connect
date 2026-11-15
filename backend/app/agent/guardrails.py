@@ -123,6 +123,8 @@ def requested_language(message: str) -> Language | None:
 def detect_language(message: str) -> Language:
     if re.search(r"[\u4e00-\u9fff]", message):
         return "zh-CN"
+    if "¿" in message or "¡" in message:
+        return "es-ES"
     if any(
         matches(message, word)
         for word in (
@@ -137,6 +139,12 @@ def detect_language(message: str) -> Language:
             "gracias",
             "puede enviar",
             "auriculares",
+            "necesito",
+            "devolver",
+            "pedido",
+            "tienen",
+            "descuento",
+            "unidades",
         )
     ):
         return "es-ES"

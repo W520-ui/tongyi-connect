@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.domain.types import Intent, Language, ReplySource
+from app.domain.types import ConversationStatus, Intent, Language, ReplySource
 
 
 class ProductSchema(BaseModel):
@@ -61,6 +61,13 @@ class AgentWorkflowData(BaseModel):
     source: ReplySource
     session_id: str
     trace: list[ToolTraceSchema]
+    conversation_id: str
+    message_id: str | None
+    client_message_id: str | None
+    run_id: str | None
+    replayed: bool
+    conversation_status: ConversationStatus
+    analysis_source: str
 
 
 class AgentChatResponse(BaseModel):

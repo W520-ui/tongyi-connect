@@ -12,4 +12,4 @@ def get_status_service(request: Request) -> StatusService:
 
 @router.get("/status", response_model=Envelope[SystemStatus], tags=["Status"])
 async def system_status(service: StatusService = Depends(get_status_service)):
-    return Envelope(data=SystemStatus(**service.snapshot()))
+    return Envelope(data=SystemStatus(**await service.snapshot()))

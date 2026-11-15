@@ -2,6 +2,7 @@ from pathlib import Path
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 
 class Settings(BaseSettings):
@@ -10,7 +11,8 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     debug: bool = False
     log_level: str = "INFO"
-    workflow_db_path: Path = Path(__file__).resolve().parents[2] / "data" / "workflow.db"
+    database_url: str = "sqlite+aiosqlite:///data/app.db"
+    merchant_id: str = "demo"
     llm_base_url: str = Field(
         default="https://api.openai.com/v1", validation_alias="AGENT_LLM_BASE_URL"
     )
@@ -30,9 +32,17 @@ class Settings(BaseSettings):
     tool_timeout_seconds: float = Field(
         default=10, gt=0, validation_alias="AGENT_TOOL_TIMEOUT_SECONDS"
     )
-    session_ttl_hours: int = Field(default=24, ge=1, validation_alias="AGENT_SESSION_TTL_HOURS")
-    max_history_turns: int = Field(
-        default=10, ge=1, le=50, validation_alias="AGENT_MAX_HISTORY_TURNS"
+    context_token_budget: int = Field(
+        default=8192, ge=128, validation_alias="AGENT_CONTEXT_TOKEN_BUDGET"
+    )
+    tool_result_max_chars: int = Field(
+        default=2000, ge=100, validation_alias="AGENT_TOOL_RESULT_MAX_CHARS"
+    )
+    summary_enabled: bool = Field(default=False, validation_alias="AGENT_SUMMARY_ENABLED")
+    analysis_enabled: bool = Field(default=True, validation_alias="AGENT_ANALYSIS_ENABLED")
+    analysis_model: str | None = Field(default=None, validation_alias="AGENT_ANALYSIS_MODEL")
+    analysis_timeout_seconds: float = Field(
+        default=10, gt=0, validation_alias="AGENT_ANALYSIS_TIMEOUT_SECONDS"
     )
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
@@ -43,14 +53,19 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
         populate_by_name=True,
+        validate_default=True,
     )
 
-    @field_validator("workflow_db_path")
+    @field_validator("database_url")
     @classmethod
-    def anchor_database_path(cls, value: Path) -> Path:
-        if not value.is_absolute():
-            value = Path(__file__).resolve().parents[2] / value
-        return value.resolve()
+    def anchor_database_path(cls, value: str) -> str:
+        url = make_url(value)
+        if url.drivername != "sqlite+aiosqlite" or not url.database or url.database == ":memory:":
+            raise ValueError("Use a file-backed sqlite+aiosqlite DATABASE_URL for this demo")
+        path = Path(url.database)
+        if not path.is_absolute():
+            path = Path(__file__).absolute().parents[2] / path
+        return url.set(database=str(path.resolve())).render_as_string(hide_password=False)
 
     @property
     def is_configured(self) -> bool:

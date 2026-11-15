@@ -1,36 +1,33 @@
-from app.domain.types import INTENT_LABELS, LANGUAGE_LABELS
-from app.repositories.archive import WorkflowArchive
+from uuid import uuid4
+
+from app.core.db import Database
+from app.repositories.analytics import AnalyticsRepository
+from app.repositories.conversations import now
+from app.repositories.models import RequestFailure
 
 
 class AnalyticsService:
-    def __init__(self, archive: WorkflowArchive) -> None:
-        self.archive = archive
+    def __init__(self, database: Database, merchant_id="demo"):
+        self.database, self.merchant_id = database, merchant_id
+        self.repository = AnalyticsRepository(database, merchant_id)
 
-    def snapshot(self) -> dict:
-        stats = self.archive.aggregates()
-        total, handoffs = stats["total"], stats["handoffs"]
-        return {
-            "total_conversations": total,
-            "human_handoffs": handoffs,
-            "pending_handoffs": stats["pending"],
-            "failed_requests": stats["failures"],
-            "resolution_rate": round((total - handoffs) / total * 100, 1) if total else 100.0,
-            "top_intent": INTENT_LABELS.get(stats["intents"][0]["code"], "综合咨询")
-            if stats["intents"]
-            else "暂无数据",
-            "languages": [
-                {**item, "label": LANGUAGE_LABELS.get(item["code"], item["code"])}
-                for item in stats["languages"]
-            ],
-            "intents": [
-                {**item, "label": INTENT_LABELS.get(item["code"], item["code"])}
-                for item in stats["intents"]
-            ],
-            "started_at": stats["started_at"],
-        }
+    async def snapshot(self):
+        return await self.repository.snapshot()
 
-    def record_failed_request(self, code: str) -> None:
-        self.archive.record_failure(code)
+    async def recent(self, limit=8):
+        return await self.repository.recent(limit)
 
-    def recent(self, limit: int = 8) -> list[dict]:
-        return self.archive.recent(limit)
+    async def pending(self, limit=20):
+        return await self.repository.pending(limit)
+
+    async def record_failed_request(self, code, conversation_id=None):
+        async with self.database.transaction() as transaction:
+            transaction.add(
+                RequestFailure(
+                    id=str(uuid4()),
+                    merchant_id=self.merchant_id,
+                    conversation_id=conversation_id,
+                    error_code=code,
+                    created_at=now(),
+                )
+            )

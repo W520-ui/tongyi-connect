@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.agent.effects import Effect
@@ -44,6 +44,9 @@ class RunCompleted:
 class RunFailed:
     error_code: str
     message: str
+    trace: RunTrace = field(default_factory=RunTrace)
+    usage: Usage | None = None
+    rounds: int = 0
 
 
 AgentEvent = ToolStarted | ToolFinished | TextDelta | RunCompleted | RunFailed

@@ -10,7 +10,7 @@ import httpx
 
 from app.agent.llm.base import ModelResponse, StreamChunk, Usage
 from app.core.config import Settings
-from app.core.errors import AppError
+from app.core.errors import AppError, UnsupportedResponseFormat
 from app.domain.types import Message, ToolCall
 
 logger = logging.getLogger(__name__)
@@ -160,6 +160,8 @@ class OpenAICompatibleClient:
                 raise AppError("LLM_UPSTREAM_ERROR") from None
             if response.status_code >= 400:
                 self._log_upstream(response)
+                if response_format is not None and response.status_code in (400, 422):
+                    raise UnsupportedResponseFormat()
                 if (response.status_code == 429 or response.status_code >= 500) and attempt < 2:
                     await asyncio.sleep(retry_delay(response.headers.get("Retry-After"), attempt))
                     continue

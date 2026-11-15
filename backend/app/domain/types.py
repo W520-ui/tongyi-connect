@@ -3,7 +3,8 @@ from typing import Any, Literal
 
 Language = Literal["zh-CN", "en-US", "es-ES"]
 Intent = Literal["quote", "logistics", "specs", "after_sales", "general"]
-ReplySource = Literal["native", "native+human-handoff"]
+ReplySource = Literal["native", "native+human-handoff", "paused-for-human"]
+ConversationStatus = Literal["bot_active", "pending_human", "human_active", "resolved"]
 
 INTENT_LABELS: dict[Intent, str] = {
     "quote": "询价",
@@ -44,6 +45,8 @@ class InboundMessage:
     username: str | None = None
     locale: str = "zh-CN"
     streaming: bool = False
+    client_message_id: str | None = None
+    legacy_session: bool = True
 
 
 @dataclass(frozen=True)
@@ -80,6 +83,10 @@ class Turn:
     tool_calls: tuple[dict[str, Any], ...] = ()
     tool_call_id: str | None = None
     name: str | None = None
+    id: str | None = None
+    seq: int = 0
+    run_id: str | None = None
+    client_message_id: str | None = None
 
 
 @dataclass
@@ -92,6 +99,12 @@ class Session:
     destination_country: str | None = None
     quantity: int | None = None
     updated_at: str = ""
+    status: ConversationStatus = "bot_active"
+    summary: str | None = None
+    version: int = 1
+    merchant_id: str = "demo"
+    created_at: str = ""
+    last_message_at: str | None = None
 
     @property
     def last_product_id(self) -> str | None:
@@ -146,3 +159,10 @@ class WorkflowResult:
     session_id: str
     trace: RunTrace = field(default_factory=RunTrace)
     steps: tuple[str, ...] = ()
+    conversation_status: ConversationStatus = "bot_active"
+    message_id: str | None = None
+    client_message_id: str | None = None
+    run_id: str | None = None
+    replayed: bool = False
+    analysis_source: Literal["llm", "heuristic"] = "heuristic"
+    handoff_id: str | None = None

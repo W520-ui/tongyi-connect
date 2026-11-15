@@ -26,7 +26,7 @@ class CommandRouter:
         if not text.startswith("/"):
             return None
         name, _, args = text[1:].partition(" ")
-        return (name.lower(), args.strip()) if name else None
+        return (name.lower(), args.strip()) if name else ("help", "")
 
     async def handle(
         self, name: str, args: str, services: CommandServices
@@ -41,4 +41,4 @@ class CommandRouter:
             return await services.command_product()
         if name == "handoff":
             return await services.command_handoff()
-        return None
+        return await services.command_help()
