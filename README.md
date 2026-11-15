@@ -1,101 +1,93 @@
-# 通译智联 Web 端
+# 通译智联
 
-通译智联是面向跨境服务场景的 Web 应用。当前版本已打通“海外客户咨询 → Agent 意图识别 → 商品资料检索 → 多语言回复 → 商家中文摘要 → 疑难问题人工接管 → 数据看板”的演示闭环。
+面向中小跨境商家的 AI 客服项目。本地集成分支 `codex/front-back-integration` 已合并 `frontend/v2` 的新界面和 `backend/phase-2` 的后端。
+
+**当前状态：** 新前端完成视觉原型，客户聊天、收件箱、看板和系统页仍使用 `src/fixtures/` 的演示数据。页面中的回复、接管操作和指标尚未调用真实后端。后端第 2 阶段已完成数据库、会话与工单状态、记忆和事后分析；新会话/工单接口和 SSE 在第 3 阶段交付后，再接通新前端。
+
+本次合并记录、验证结果和恢复入口见 [docs/INTEGRATION.md](docs/INTEGRATION.md)。
 
 ## 技术栈
 
-- Vue 3 + TypeScript
-- Vite
-- Vue Router
-- Pinia
-- shadcn-vue（Reka UI + Tailwind CSS v4）+ lucide 图标 + Inter 字体
-- Vitest + Vue Test Utils（前端单元测试）
-- 后端：FastAPI + 自研进程内 Agent 运行时（Python 3.11+）
+- Vue 3、TypeScript、Vite、Vue Router、Pinia
+- shadcn-vue（Reka UI + Tailwind CSS v4）、lucide、Inter 本地字体
+- Vitest、Vue Test Utils、jsdom
+- FastAPI、自研进程内 Agent、httpx
+- SQLAlchemy 2.0 async、Alembic、aiosqlite，单机 SQLite 演示
 
 ## 本地运行
 
-```bash
-npm install
+请在 `D:\10178\Projects\tongyi-connect` 主目录执行；原 `tongyi-connect-frontend` worktree 和两个阶段分支仍保留。
+
+首次安装后端环境：
+
+```powershell
+cd D:\10178\Projects\tongyi-connect\backend
+uv venv --python 3.12 --managed-python .venv
+uv sync --frozen --extra dev
+cd ..
+npm ci
 npm run dev
 ```
 
-在项目根目录的 VS Code 终端执行 `npm run dev` 会同时启动 FastAPI 后端和 Vite 前端，
-然后在浏览器打开 <http://127.0.0.1:5173/>。按 `Ctrl+C` 会停止两个开发服务。Agent 运行在后端进程内，不需要再启动任何外部 Agent 服务。
+已经有 backend/.venv 时，只需 `uv sync --frozen --extra dev` 同步后端依赖。Python 需要 ≥ 3.11，虚拟环境保持在 backend/.venv。
 
-`backend/.venv` 不存在时，请先按 [`backend/README.md`](backend/README.md) 创建后端虚拟环境并安装依赖。
-如果只需要启动前端，可以执行 `npm run dev:frontend`；此时聊天和数据接口仍需要后端服务。
+`npm run dev` 同时启动 FastAPI 和 Vite；打开 [客户窗口](http://127.0.0.1:5173/chat) 或 [商家控制台](http://127.0.0.1:5173/console/inbox)。Vite 固定监听 127.0.0.1，端口被占用时以终端显示的地址为准。Ctrl+C 停止两项服务。只查看视觉原型可以执行 `npm run dev:frontend`，无需模型密钥。
 
-生产构建：
+后端密钥、模型与数据库配置见 [backend/README.md](backend/README.md)。默认数据库为 backend/data/app.db，启动时运行迁移并初始化种子。当前 UI 使用样例数据，配置模型密钥不会使新界面自动连接后端。
 
-```bash
-npm run build
-```
+## 页面与目录
 
-前端单元测试（运行在 jsdom 中，不需要启动后端）：
+客户窗口 `/chat` 支持中文、英文、西语界面，展示消息、商品卡片与转人工状态。商家控制台包含：
 
-```bash
-npm run test
-```
-
-## 目录约定
-
-前端分成两个互相独立的页面：
-
-- 客户窗口 `/chat`：面向海外客户的聊天页，界面支持中文、英文、西班牙语；
-- 商家控制台 `/console`：收件箱、数据看板、商品资料、系统状态，支持深色模式。
+- `/console/inbox`：工单列表与会话详情
+- `/console/dashboard`：咨询、意图、语言和最近咨询
+- `/console/catalog`：商品资料
+- `/console/system`：系统状态展示
 
 ```text
 src/
-├── api/           接口契约类型（docs/backend-prompt.md 附录 A）
-├── components/    ui/（shadcn-vue 组件）、chat/（客户窗口）、console/（商家控制台）
-├── fixtures/      视觉原型阶段的演示数据（接上模拟后端后删除）
-├── i18n/          客户窗口的三语文案
-├── layouts/       控制台布局
-├── pages/         页面入口
-├── router/        路由配置
-├── stores/        Pinia 状态
-├── lib/           工具函数（cn）
-├── style.css      Tailwind 入口与主题变量（浅色 / 深色）
-└── theme/         控制台深色模式开关
+├── api/          附录 A 的契约类型；请求封装与 SSE 客户端待实现
+├── components/   ui/、chat/、console/
+├── fixtures/     当前视觉原型的演示数据
+├── i18n/         客户界面的三语文案
+├── layouts/      控制台布局
+├── pages/        客户窗口与商家控制台
+├── stores/       当前本地演示状态
+├── theme/        浅色与深色主题
+└── utils/        时间等工具及单元测试
+backend/          已完成第 2 阶段的后端、迁移、测试与评测
+docs/             任务说明、前端计划、设计截图与集成记录
 ```
 
-单元测试放在被测代码旁边的 `__tests__/` 目录里，文件名以 `.spec.ts` 结尾。前端重写的计划和进度见 [`docs/frontend-plan.md`](docs/frontend-plan.md)。
+[docs/backend-prompt.md](docs/backend-prompt.md) 是有效的后端任务与接口契约；[docs/frontend-plan.md](docs/frontend-plan.md) 记录前端后续阶段。设计截图在 docs/design/。
 
-复制 `.env.example` 为 `.env.local` 后，可通过 `VITE_API_BASE_URL` 配置后端 API 地址。开发服务器会将 `/api` 请求代理到本地 FastAPI（`http://127.0.0.1:8000`）。
+## 已交付后端
 
-## 后端
+健康与状态接口为 `GET /api/v1/health` 和 `GET /api/v1/status`。现有聊天、商品、看板及确认接管接口继续保留，新前端尚未使用它们。
 
-FastAPI 后端工程位于 [`backend/`](backend/README.md)，本地启动方式和配置说明见后端文档。API 健康检查入口为 `/api/v1/health`。
+后端运行器在 agent/runtime.py，以 httpx 直连 OpenAI 兼容服务。ConversationService 负责入站消息、会话锁与事务保存；仓储统一存储只追加消息、运行、商品、配送和工单；ContextBuilder 按预算构建记忆；PostAnalyzer 生成结构化标注及中文摘要。未配置模型时，普通聊天返回 LLM_NOT_CONFIGURED，本地指令和商品/状态接口仍可使用。
 
-前端工作台请求 `POST /api/v1/agent/chat`，由后端进程内的自研 Agent 运行时处理：会话管理、指令响应、工具调用（商品检索 / 报价 / 物流 / 参数 / 售后登记）和 OpenAI 兼容模型调用都在服务端完成，浏览器不接触任何模型密钥。
+完整配置、接管状态机、种子重建及 API 四步演示验证见 [backend/README.md](backend/README.md)。阶段记录见 backend/PHASE_0.md、PHASE_1.md、PHASE_2.md。
 
-Agent 依赖可用的对话模型。未配置 `AGENT_LLM_API_KEY`、无法连接模型服务或工具调用超过轮次上限时，`/api/v1/agent/chat` 返回 502/503 错误，由前端展示错误提示。
+## 验证
 
-看板与人机协同接口：
+主目录执行：
 
-- `GET /api/v1/catalog/products`：商品知识库
-- `GET /api/v1/dashboard/overview`：咨询量、意图和人工接管统计
-- `GET /api/v1/dashboard/recent`：最近咨询归档
-- `GET /api/v1/dashboard/handoffs`：待人工接管队列
-- `POST /api/v1/dashboard/handoffs/{record_id}/acknowledge`：商家确认接管
+```powershell
+npm ci
+npm run build
+npm run test
+```
 
-## 自研 Agent 运行时
+backend 目录执行：
 
-`backend/app/agent/` 与 FastAPI 同进程，不额外占用端口：
+```powershell
+uv sync --frozen --extra dev
+uv lock --check
+uv run --frozen --extra dev ruff check .
+uv run --frozen --extra dev ruff format --check .
+$env:PYTHONIOENCODING = "utf-8"
+uv run --frozen --extra dev pytest
+```
 
-- `engine.py`：编排核心，指令优先 → 会话加载 → 业务分析 → LLM function calling 循环 → 归档
-- `session.py`：SQLite 多轮会话与商品上下文（`/reset` 可清空）
-- `registry.py` + `tools/`：工具注册与 JSON Schema 导出，新增工具只需 `@tool(...)`
-- `providers/`：`LLMProvider` 协议 + OpenAI 兼容实现（httpx 直连，不装 SDK）
-- `commands.py`：`/help /reset /lang /product /handoff`
-
-原 `services/workflow.py` 继续负责语言与意图识别、商品匹配、商家中文摘要和看板归档。
-
-## 演示流程
-
-1. 打开工作台，发送“请用英文回复：星云降噪耳机 Pro 支持发往西班牙吗？”，查看语言识别、询价与物流意图、商品命中和英文回复。
-2. 在同一会话继续发送“那它的物流要多久？”，Agent 会从会话上下文恢复上一轮命中的商品。
-3. 发送“客户说耳机收到后无法开机，帮我登记售后”，查看人工接管队列，点击“确认接管”完成闭环。
-4. 查看意图统计、语言分布和最近咨询归档；设置页可以检查后端健康状态与现场演示顺序。
-
-前端请求的 Agent 超时为 70 秒；模型连接建立超时 5 秒、生成超时由 `AGENT_LLM_TIMEOUT_SECONDS` 控制（默认 60 秒）。
+本地 CI 保留后端 ruff/pytest，以及前端 npm ci/build/test --if-present；合并后 test 脚本会实际运行 Vitest。具体结果及尚未完成的真实接口联调见集成记录。
