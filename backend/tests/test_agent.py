@@ -5,7 +5,7 @@ import pytest
 
 from app.agent.llm.openai import parse_response
 from app.core.errors import AppError
-from app.domain.types import InboundMessage, Message, Session, ToolCall, Turn
+from app.domain.types import InboundMessage, Message, ToolCall
 from tests.support import Decision, ScriptedProvider
 
 
@@ -32,8 +32,8 @@ async def test_tool_calling_loop_returns_model_reply_and_archives(runtime_factor
     assert len(provider.calls) == 2
     assert "catalog_search" in [item["function"]["name"] for item in provider.calls[0]["tools"]]
     assert any(message.role == "tool" for message in provider.calls[1]["messages"])
-    assert runtime.metrics.snapshot()["total_conversations"] == 1
-    session = runtime.service.store.load("s1")
+    assert runtime.snapshot()["total_conversations"] == 1
+    session = runtime.session("s1")
     assert (
         len(
             [
@@ -62,12 +62,20 @@ async def test_after_sales_tool_triggers_human_handoff(runtime_factory):
     result = await send(runtime, "The headset arrived damaged.", "s2")
     assert result["data"]["needs_human"]
     assert result["data"]["source"] == "native+human-handoff"
-    assert runtime.metrics.snapshot()["human_handoffs"] == 1
+    assert runtime.snapshot()["human_handoffs"] == 1
 
 
 async def test_follow_up_reuses_session_product(runtime_factory):
     runtime = runtime_factory(
-        ScriptedProvider([Decision(reply="First reply."), Decision(reply="Second reply.")])
+        ScriptedProvider(
+            [
+                Decision(
+                    tool_calls=(ToolCall("focus", "catalog_search", {"query": "headphones"}),)
+                ),
+                Decision(reply="First reply."),
+                Decision(reply="Second reply."),
+            ]
+        )
     )
     await send(runtime, "Please quote the headphones", "s3")
     result = await send(runtime, "And how long is the delivery time?", "s3")
@@ -82,7 +90,8 @@ async def test_missing_api_key_raises(runtime_factory):
     with pytest.raises(AppError) as error:
         await send(runtime, "hello")
     assert error.value.code == "LLM_NOT_CONFIGURED"
-    assert runtime.metrics.snapshot()["total_conversations"] == 0
+    assert runtime.snapshot()["total_conversations"] == 1
+    assert len(runtime.session("test-session").turns) == 1
     assert provider.calls == []
 
 
@@ -115,14 +124,14 @@ async def test_reset_clears_session_history(runtime_factory):
     runtime = runtime_factory(ScriptedProvider([Decision(reply="hello")]))
     await send(runtime, "Please quote the headphones", "s5")
     await send(runtime, "/reset", "s5")
-    assert runtime.service.store.load("s5").turns == []
+    assert runtime.session("s5").turns == []
 
 
 async def test_lang_command_sets_language(runtime_factory):
     runtime = runtime_factory()
     await send(runtime, "/lang es-ES", "s6")
-    assert runtime.service.store.load("s6").reply_language == "es-ES"
-    assert runtime.metrics.snapshot()["total_conversations"] == 0
+    assert runtime.session("s6").reply_language == "es-ES"
+    assert runtime.snapshot()["total_conversations"] == 0
 
 
 async def test_handoff_command_marks_needs_human(runtime_factory):
@@ -205,43 +214,60 @@ def test_message_serialization():
     )
 
 
-def test_ttl_expires_session(runtime_factory):
-    runtime = runtime_factory()
-    store = runtime.service.store
-    session = Session("s")
-    store.append(session, Turn("user", "hi", datetime.now(UTC).isoformat()))
-    store.connection.execute(
-        "UPDATE agent_sessions SET updated_at=? WHERE session_id=?",
-        ((datetime.now(UTC) - timedelta(hours=48)).isoformat(), "s"),
-    )
-    store.connection.commit()
-    assert store.load("s", 24).turns == []
+async def test_old_timestamp_does_not_remove_append_only_history(runtime_factory):
+    from sqlalchemy import update
+
+    from app.repositories.models import Conversation
+
+    runtime = runtime_factory(ScriptedProvider([Decision(reply="Hello")]))
+    await send(runtime, "Hi", "old-conversation")
+    snapshot = runtime.session("old-conversation")
+    original = [(turn.id, turn.content) for turn in snapshot.turns]
+    async with runtime.database.transaction() as transaction:
+        await transaction.execute(
+            update(Conversation)
+            .where(Conversation.id == snapshot.session_id)
+            .values(updated_at=(datetime.now(UTC) - timedelta(hours=48)).isoformat())
+        )
+    assert [
+        (turn.id, turn.content) for turn in runtime.session("old-conversation").turns
+    ] == original
 
 
 @pytest.mark.parametrize("corrupt_turns", ["{broken", "null", "[1]", '[{"unexpected": 1}]'])
-def test_corrupt_legacy_history_keeps_session_preferences(runtime_factory, corrupt_turns):
-    store = runtime_factory().service.store
-    store.save(Session("legacy", focused_product_ids=("headset-pro",), reply_language="es-ES"))
-    store.connection.execute(
-        "UPDATE agent_sessions SET turns=? WHERE session_id=?", (corrupt_turns, "legacy")
-    )
-    store.connection.commit()
-    loaded = store.load("legacy")
+async def test_corrupt_legacy_history_is_not_imported(runtime_factory, corrupt_turns):
+    from sqlalchemy import text
+
+    runtime = runtime_factory()
+    snapshot = runtime.session("legacy")
+    snapshot.focused_product_ids, snapshot.reply_language = ("headset-pro",), "es-ES"
+    await runtime.service.store.save_state(snapshot)
+    async with runtime.database.transaction() as transaction:
+        await transaction.execute(text("CREATE TABLE agent_sessions (session_id TEXT, turns TEXT)"))
+        await transaction.execute(
+            text("INSERT INTO agent_sessions VALUES ('legacy', :turns)"), {"turns": corrupt_turns}
+        )
+    loaded = runtime.session("legacy")
     assert loaded.turns == []
-    assert loaded.focused_product_ids == ("headset-pro",)
-    assert loaded.reply_language == "es-ES"
+    assert loaded.focused_product_ids == ("headset-pro",) and loaded.reply_language == "es-ES"
 
 
 @pytest.mark.parametrize("corrupt_focus", ["{broken", '"headset-pro"', "[1]"])
-def test_corrupt_focus_recovers_legacy_product(runtime_factory, corrupt_focus):
-    store = runtime_factory().service.store
-    store.save(Session("legacy", focused_product_ids=("headset-pro",)))
-    store.connection.execute(
-        "UPDATE agent_sessions SET focused_product_ids=? WHERE session_id=?",
-        (corrupt_focus, "legacy"),
-    )
-    store.connection.commit()
-    assert store.load("legacy").focused_product_ids == ("headset-pro",)
+async def test_corrupt_legacy_focus_is_not_imported(runtime_factory, corrupt_focus):
+    from sqlalchemy import text
+
+    runtime = runtime_factory()
+    snapshot = runtime.session("legacy")
+    snapshot.focused_product_ids = ("headset-pro",)
+    await runtime.service.store.save_state(snapshot)
+    async with runtime.database.transaction() as transaction:
+        await transaction.execute(
+            text("CREATE TABLE agent_sessions (session_id TEXT, focused_product_ids TEXT)")
+        )
+        await transaction.execute(
+            text("INSERT INTO agent_sessions VALUES ('legacy', :focus)"), {"focus": corrupt_focus}
+        )
+    assert runtime.session("legacy").focused_product_ids == ("headset-pro",)
 
 
 async def test_unexpected_service_failure_is_persisted_and_redacted(runtime_factory, monkeypatch):
@@ -250,10 +276,10 @@ async def test_unexpected_service_failure_is_persisted_and_redacted(runtime_fact
     def fail(*_args):
         raise RuntimeError("PRIVATE-SERVICE-DETAIL")
 
-    monkeypatch.setattr(runtime.service.store, "load", fail)
+    monkeypatch.setattr(runtime.service.store, "get", fail)
     with pytest.raises(AppError) as error:
         await send(runtime, "Hello")
     assert error.value.code == "INTERNAL_ERROR"
     assert "PRIVATE-SERVICE-DETAIL" not in str(error.value)
-    snapshot = runtime.metrics.snapshot()
+    snapshot = runtime.snapshot()
     assert snapshot["failed_requests"] == 1 and snapshot["total_conversations"] == 0

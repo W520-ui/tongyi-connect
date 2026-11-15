@@ -1,17 +1,28 @@
 from app.agent.guardrails import analyze_message
 from app.api.v1.presenters import present_workflow
-from app.domain.types import InboundMessage
-from app.repositories.archive import WorkflowArchive
+from app.core.db import Database
+from app.domain.types import InboundMessage, ToolCall
+from app.repositories.conversations import ConversationRepository
 from app.services.analytics import AnalyticsService
+from app.services.handoff import HandoffService
 from tests.support import Decision, ScriptedProvider
 
 MODEL_REPLY = "The Nebula ANC Headphones Pro ships to Spain in 5-8 business days."
 
 
 async def test_detects_multiple_intents_and_uses_catalog(runtime_factory):
-    runtime = runtime_factory(ScriptedProvider([Decision(reply=MODEL_REPLY)]))
+    runtime = runtime_factory(
+        ScriptedProvider(
+            [
+                Decision(
+                    tool_calls=(ToolCall("focus", "catalog_search", {"query": "headphones"}),)
+                ),
+                Decision(reply=MODEL_REPLY),
+            ]
+        )
+    )
     message = "Please quote the headphones and tell me the shipping time to Spain."
-    analysis = analyze_message(message, runtime.service.catalog.products)
+    analysis = analyze_message(message, await runtime.service.catalog.list_products())
     result = present_workflow(
         await runtime.service.handle_inbound(InboundMessage(message))
     ).model_dump()
@@ -30,9 +41,9 @@ def test_chinese_destination_does_not_change_reply_language():
 
 async def test_follow_up_message_reuses_last_matched_product(runtime_factory):
     runtime = runtime_factory(ScriptedProvider([Decision(reply=MODEL_REPLY)]))
-    session = runtime.service.store.load("followup")
+    session = runtime.session("followup")
     session.focused_product_ids = ("headset-pro",)
-    runtime.service.store.save(session)
+    await runtime.service.store.save_state(session)
     data = present_workflow(
         await runtime.service.handle_inbound(
             InboundMessage("And how long is the delivery time?", "followup")
@@ -59,14 +70,17 @@ async def test_archive_and_aggregate_survive_restart(runtime_factory):
     runtime = runtime_factory(ScriptedProvider([Decision(reply="已记录售后诉求，等待商家接管。")]))
     message = "耳机坏了，申请退款。"
     await runtime.service.handle_inbound(InboundMessage(message, "test-session"))
-    assert runtime.metrics.snapshot()["total_conversations"] == 1
-    assert runtime.archive.recent()[0]["intent_label"] == "售后服务"
-    handoff_id = runtime.handoffs.pending()[0]["id"]
-    runtime.metrics.record_failed_request("LLM_TIMEOUT")
-    restarted_archive = WorkflowArchive(runtime.archive.db_path)
-    restarted = AnalyticsService(restarted_archive)
+    assert runtime.snapshot()["total_conversations"] == 1
+    assert runtime.recent()[0]["intent_label"] == "售后服务"
+    handoff_id = runtime.pending()[0]["id"]
+    await runtime.metrics.record_failed_request("LLM_TIMEOUT")
+    restarted_database = Database(runtime.database.url)
+    restarted = AnalyticsService(restarted_database)
+    restarted_handoffs = HandoffService(
+        restarted_database, ConversationRepository(restarted_database)
+    )
     try:
-        snapshot = restarted.snapshot()
+        snapshot = await restarted.snapshot()
         assert (
             snapshot["total_conversations"]
             == snapshot["human_handoffs"]
@@ -74,10 +88,10 @@ async def test_archive_and_aggregate_survive_restart(runtime_factory):
             == 1
         )
         assert snapshot["failed_requests"] == 1
-        assert restarted_archive.recent()[0]["message"] == message
-        assert restarted_archive.acknowledge(handoff_id)
-        assert not restarted_archive.acknowledge(handoff_id)
-        assert restarted.snapshot()["pending_handoffs"] == 0
-        assert restarted_archive.recent()[0]["human_acknowledged"] == 1
+        assert (await restarted.recent())[0]["message"] == message
+        assert await restarted_handoffs.acknowledge(handoff_id)
+        assert not await restarted_handoffs.acknowledge(handoff_id)
+        assert (await restarted.snapshot())["pending_handoffs"] == 0
+        assert (await restarted.recent())[0]["human_acknowledged"] == 1
     finally:
-        restarted_archive.close()
+        await restarted_database.close()

@@ -7,8 +7,9 @@ import pytest
 
 from app.agent.guardrails import analyze_message
 from app.api.v1.presenters import present_workflow
+from app.core.db import Database
 from app.domain.types import InboundMessage, ToolCall
-from app.repositories.archive import WorkflowArchive
+from app.repositories.models import HandoffTicket
 from app.services.analytics import AnalyticsService
 from tests.support import Decision, ScriptedProvider
 
@@ -71,7 +72,7 @@ async def test_defect_02_reset_clears_product_and_archive_fallback(runtime_facto
     assert "headset-pro" not in product["reply"]
     assert "星云降噪耳机" not in product["reply"]
     assert followup["product_id"] is None
-    assert runtime.service.store.load("regression").last_product_id is None
+    assert runtime.session("regression").last_product_id is None
 
 
 async def test_defect_03_explicit_language_survives_customer_language_change(runtime_factory):
@@ -81,14 +82,14 @@ async def test_defect_03_explicit_language_survives_customer_language_change(run
     await send(runtime, "/lang es-ES")
     await send(runtime, "Hello, tell me more.")
     await send(runtime, "And what else?")
-    assert runtime.service.store.load("regression").language == "es-ES"
+    assert runtime.session("regression").language == "es-ES"
     assert "es-ES" in runtime.provider.calls[-1]["messages"][0].content
 
 
 async def test_defect_03_invalid_language_is_rejected(runtime_factory):
     runtime = runtime_factory()
     result = await send(runtime, "/lang foo")
-    assert runtime.service.store.load("regression").language != "foo"
+    assert runtime.session("regression").language != "foo"
     assert all(language in result["reply"] for language in ("zh-CN", "en-US", "es-ES"))
 
 
@@ -104,7 +105,7 @@ async def command_sequence(runtime):
 async def test_defect_04_commands_do_not_increment_consultation_counts(runtime_factory):
     runtime = runtime_factory(ScriptedProvider([Decision(reply="Answer") for _ in range(3)]))
     await command_sequence(runtime)
-    assert runtime.metrics.snapshot()["total_conversations"] == 3
+    assert runtime.snapshot()["total_conversations"] == 3
 
 
 async def test_defect_04_commands_and_their_replies_are_absent_from_model_history(runtime_factory):
@@ -123,7 +124,7 @@ async def test_defect_04_commands_and_their_replies_are_absent_from_model_histor
 async def test_defect_05_handoff_preserves_user_request_reason(runtime_factory):
     runtime = runtime_factory()
     await send(runtime, "/handoff")
-    assert runtime.handoffs.pending()[0]["handoff_reason"] == "用户主动请求人工接管"
+    assert runtime.pending()[0]["handoff_reason"] == "用户主动请求人工接管"
 
 
 async def test_defect_06_anonymous_requests_receive_independent_session_ids(runtime_factory):
@@ -144,7 +145,7 @@ async def test_defect_07_concurrent_inbound_messages_are_all_saved_in_order(runt
         )
     )
     await asyncio.gather(send(runtime, "First inquiry"), send(runtime, "Second inquiry"))
-    turns = runtime.service.store.load("regression").turns
+    turns = runtime.session("regression").turns
     assert [(turn.role, turn.content) for turn in turns] == [
         ("user", "First inquiry"),
         ("assistant", "First reply"),
@@ -155,10 +156,10 @@ async def test_defect_07_concurrent_inbound_messages_are_all_saved_in_order(runt
 
 async def test_defect_08_statistics_are_consistent_between_instances(runtime_factory):
     runtime = runtime_factory(ScriptedProvider([Decision(reply="Recorded your request.")]))
-    second = WorkflowArchive(runtime.archive.db_path)
+    second = Database(runtime.database.url)
     try:
         await send(runtime, "I want a refund")
-        snapshot = AnalyticsService(second).snapshot()
+        snapshot = await AnalyticsService(second).snapshot()
         assert {
             key: snapshot[key]
             for key in ("total_conversations", "human_handoffs", "pending_handoffs")
@@ -168,7 +169,7 @@ async def test_defect_08_statistics_are_consistent_between_instances(runtime_fac
             "pending_handoffs": 1,
         }
     finally:
-        second.close()
+        await second.close()
 
 
 @pytest.mark.parametrize("observable", ["database", "merchant_queue"])
@@ -184,10 +185,10 @@ async def test_defect_09_after_sales_issue_is_persisted_and_visible(runtime_fact
     await send(runtime, "Please ask the merchant to help.")
     assert len(provider.calls) == 2
     if observable == "database":
-        row = runtime.archive.connection.execute("SELECT * FROM workflow_conversations").fetchone()
-        assert dict(row).get("issue_summary") == issue
+        ticket = runtime.rows(HandoffTicket)[0]
+        assert ticket.issue_summary == issue
     else:
-        assert issue in json.dumps(runtime.handoffs.pending()[0], ensure_ascii=False)
+        assert issue in json.dumps(runtime.pending()[0], ensure_ascii=False)
 
 
 @pytest.mark.parametrize("observable", ["card", "steps", "session"])
@@ -212,7 +213,7 @@ async def test_defect_10_tool_results_drive_cards_and_product_memory(runtime_fac
         assert "catalog_search" in steps and "catalog_quote" in steps
         assert steps.index("catalog_search") < steps.index("catalog_quote")
     else:
-        assert runtime.service.store.load("regression").last_product_id == "headset-pro"
+        assert runtime.session("regression").last_product_id == "headset-pro"
 
 
 async def test_defect_11_known_spain_shipping_remains_available(runtime_factory):
@@ -269,13 +270,12 @@ async def test_defect_11_invalid_country_returns_tool_error_to_model(runtime_fac
     assert isinstance(error, dict)
     assert error.get("code") == "TOOL_VALIDATION_ERROR"
     assert isinstance(error.get("message"), str) and error["message"]
-    assert runtime.archive.recent()[0]["tool_trace"]
+    assert runtime.recent()[0]["tool_trace"]
     assert data["trace"][0]["ok"] is False
     assert data["trace"][0]["error"]
     assert data["reply"] == "Please confirm the destination country."
 
 
-@defect(12, phase=2)
 async def test_defect_12_scripted_post_analysis_supplies_chinese_translation(runtime_factory):
     translation = "你好，耳机寄往墨西哥需要多长时间？"
     analysis = {
@@ -292,7 +292,7 @@ async def test_defect_12_scripted_post_analysis_supplies_chinese_translation(run
             Decision(reply=json.dumps(analysis, ensure_ascii=False)),
         ]
     )
-    runtime = runtime_factory(provider)
+    runtime = runtime_factory(provider, analysis_enabled=True)
     data = await send(runtime, "Hola, ¿cuánto tarda el envío de los auriculares a México?")
     assert translation in data["merchant_summary"]
     assert data["intent"] == "logistics"

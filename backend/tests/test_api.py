@@ -82,7 +82,7 @@ def assert_workflow_contract(data):
     assert type(data["needs_human"]) is bool
     assert data["product_id"] is None or isinstance(data["product_id"], str)
     assert data["handoff_reason"] is None or isinstance(data["handoff_reason"], str)
-    assert data["source"] in {"native", "native+human-handoff"}
+    assert data["source"] in {"native", "native+human-handoff", "paused-for-human"}
     assert isinstance(data["matched_products"], list)
     for product in data["matched_products"]:
         assert PRODUCT_FIELDS <= product.keys()
@@ -169,7 +169,7 @@ def test_chat_rejects_invalid_requests_without_model_calls(api_client, payload):
     client, runtime = api_client
     assert client.post("/api/v1/agent/chat", json=payload).status_code == 422
     assert runtime.provider.calls == []
-    assert runtime.metrics.snapshot()["total_conversations"] == 0
+    assert runtime.snapshot()["total_conversations"] == 0
 
 
 @pytest.mark.parametrize(
@@ -210,9 +210,12 @@ def test_model_errors_count_failures_without_archiving(api_client, code, expecte
     assert response.json()["error"]["code"] == code
     assert response.json()["detail"] == response.json()["error"]["message"]
     assert "test-key" not in response.text
-    assert runtime.metrics.snapshot()["failed_requests"] == 1
-    assert runtime.metrics.snapshot()["total_conversations"] == 0
-    assert runtime.service.store.load("error").turns == []
+    assert runtime.snapshot()["failed_requests"] == 1
+    assert runtime.snapshot()["total_conversations"] == 1
+    assert [(turn.role, turn.content) for turn in runtime.session("error").turns] == [
+        ("user", "hello")
+    ]
+    assert runtime.recent() == []
 
 
 def test_missing_model_configuration_does_not_call_model(api_client):

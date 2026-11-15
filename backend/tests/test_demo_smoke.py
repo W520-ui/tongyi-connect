@@ -96,19 +96,21 @@ def test_readme_demo_four_steps(api_client):
     assert len(recent) == 3
     assert recent[0]["human_acknowledged"] is True
     assert recent[0]["reply"] == aftersales["reply"]
-    assert all(item["session_id"] == "demo-smoke" for item in recent)
+    assert all(
+        item["session_id"] == item["conversation_id"] == first["session_id"] for item in recent
+    )
     assert client.get("/api/v1/dashboard/handoffs").json()["data"] == []
     assert client.get("/api/v1/health").status_code == 200
     assert (
         len(
             [
                 turn
-                for turn in runtime.service.store.load("demo-smoke").turns
+                for turn in runtime.session("demo-smoke").turns
                 if turn.role == "user" or turn.role == "assistant" and not turn.tool_calls
             ]
         )
         == 6
     )
-    assert any(turn.role == "tool" for turn in runtime.service.store.load("demo-smoke").turns)
+    assert any(turn.role == "tool" for turn in runtime.session("demo-smoke").turns)
     assert len(runtime.provider.calls) == 7
     assert not runtime.provider.decisions

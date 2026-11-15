@@ -1,7 +1,7 @@
 import ast
+import asyncio
 import importlib
 import json
-import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -23,7 +23,7 @@ def test_lifespan_creates_and_closes_owned_resources(settings_factory):
     with TestClient(app) as client:
         state = app.state
         assert not state.http_client.is_closed
-        assert state.archive.ping()
+        assert client.portal.call(state.database.ping)
         assert state.conversation_service.runner.client is state.llm
         assert client.get("/api/v1/status").json()["data"] == {
             "version": "0.1.0",
@@ -32,14 +32,14 @@ def test_lifespan_creates_and_closes_owned_resources(settings_factory):
             "db_ok": True,
         }
     assert state.http_client.is_closed
-    assert not state.archive.ping()
-    with pytest.raises(sqlite3.ProgrammingError):
-        state.session_store.connection.execute("SELECT 1")
+    assert state.database.closed
+    assert not asyncio.run(state.database.ping())
+    assert not state.background.tasks
 
 
 def test_startup_failure_closes_resources_already_created(settings_factory, monkeypatch):
-    clients, archives = [], []
-    from app.main import WorkflowArchive, httpx
+    clients, databases = [], []
+    from app.main import Database, httpx
 
     original_client = httpx.AsyncClient
 
@@ -48,25 +48,24 @@ def test_startup_failure_closes_resources_already_created(settings_factory, monk
         clients.append(client)
         return client
 
-    def capture_archive(path):
-        archive = WorkflowArchive(path)
-        archives.append(archive)
-        return archive
+    def capture_database(url):
+        database = Database(url)
+        databases.append(database)
+        return database
 
-    def fail_store(_path):
+    async def fail_seed(_database):
         raise RuntimeError("Startup failed")
 
     monkeypatch.setattr("app.main.httpx.AsyncClient", capture_client)
-    monkeypatch.setattr("app.main.WorkflowArchive", capture_archive)
-    monkeypatch.setattr("app.main.SessionStore", fail_store)
+    monkeypatch.setattr("app.main.Database", capture_database)
+    monkeypatch.setattr("app.main.seed_missing", fail_seed)
     with (
         pytest.raises(RuntimeError, match="Startup failed"),
         TestClient(create_app(settings_factory())),
     ):
         pytest.fail("Failed startup must not serve requests")
-    assert len(clients) == len(archives) == 1
-    assert clients[0].is_closed
-    assert not archives[0].ping()
+    assert len(clients) == len(databases) == 1
+    assert clients[0].is_closed and databases[0].closed
 
 
 def test_status_without_model_and_health_compatibility(settings_factory):
@@ -82,16 +81,17 @@ def test_separate_app_instances_do_not_share_engine_or_database(settings_factory
     second = create_app(settings_factory(), llm_client=ScriptedProvider())
     with TestClient(first), TestClient(second):
         assert first.state.conversation_service is not second.state.conversation_service
-        assert first.state.archive.db_path != second.state.archive.db_path
+        assert first.state.database.path != second.state.database.path
         assert first.state.http_client is not second.state.http_client
 
 
 def test_all_modules_import_without_constructing_resources(tmp_path):
     script = """
-import importlib, pkgutil, sqlite3, httpx, pydantic_settings
+import importlib, pkgutil, sqlite3, httpx, pydantic_settings, sqlalchemy.ext.asyncio
 def forbidden(*args, **kwargs):
     raise AssertionError('Application import constructed a resource')
 sqlite3.connect = forbidden
+sqlalchemy.ext.asyncio.create_async_engine = forbidden
 httpx.AsyncClient.__init__ = forbidden
 pydantic_settings.BaseSettings.__init__ = forbidden
 import app
@@ -168,8 +168,7 @@ def test_openapi_export_does_not_start_resources(tmp_path, settings_factory, mon
     def forbidden(*_args, **_kwargs):
         raise AssertionError("Export must not start resources")
 
-    monkeypatch.setattr("app.main.WorkflowArchive", forbidden)
-    monkeypatch.setattr("app.main.SessionStore", forbidden)
+    monkeypatch.setattr("app.main.Database", forbidden)
     monkeypatch.setattr("app.main.httpx.AsyncClient", forbidden)
     target = export_openapi(tmp_path / "openapi.json", settings_factory())
     schema = json.loads(target.read_text(encoding="utf-8"))

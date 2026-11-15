@@ -189,9 +189,12 @@ def test_api_total_timeout_counts_failure_without_saving_incomplete_history(runt
     )
     assert response.status_code == 504
     assert response.json()["error"]["code"] == "AGENT_RUN_TIMEOUT"
-    assert runtime.metrics.snapshot()["failed_requests"] == 1
-    assert runtime.metrics.snapshot()["total_conversations"] == 0
-    assert runtime.service.store.load("timeout").turns == []
+    assert runtime.snapshot()["failed_requests"] == 1
+    assert runtime.snapshot()["total_conversations"] == 1
+    assert [(turn.role, turn.content) for turn in runtime.session("timeout").turns] == [
+        ("user", "hello")
+    ]
+    assert runtime.recent() == []
 
 
 async def test_gateway_ignoring_final_tool_choice_fails_without_another_tool_round(runtime_factory):
@@ -227,7 +230,7 @@ async def test_truncation_and_token_usage_are_recorded(runtime_factory, caplog):
     assert "truncated" in caplog.text
     provider.decisions.append(Decision(reply="Another truncated reply", finish_reason="length"))
     await runtime.service.handle_inbound(InboundMessage("Hello.", "truncated"))
-    assert json.loads(runtime.archive.recent()[0]["tool_trace"])["truncated"] is True
+    assert json.loads(runtime.recent()[0]["tool_trace"])["truncated"] is True
 
 
 async def test_streaming_accumulates_tool_fragments_by_index_before_execution(runtime_factory):
