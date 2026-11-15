@@ -7,16 +7,17 @@ analysis, catalog matching, merchant summaries and archive metrics.
 
 from __future__ import annotations
 
-from collections import Counter
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import re
 import sqlite3
+from collections import Counter
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
+from app.core.config import get_settings
 
 Intent = Literal["quote", "logistics", "specs", "after_sales", "general"]
 
@@ -103,7 +104,7 @@ class WorkflowMetrics:
     """Persist recent demo conversations and aggregate dashboard counters."""
 
     def __init__(self, db_path: Path | None = None) -> None:
-        self.db_path = db_path or Path(__file__).resolve().parents[2] / "data" / "workflow.db"
+        self.db_path = db_path or get_settings().workflow_db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # The agent runtime may serve requests from a worker thread (e.g.
         # test clients or sync endpoints), so allow cross-thread use.
@@ -137,7 +138,7 @@ class WorkflowMetrics:
         self._ensure_column("human_acknowledged", "INTEGER NOT NULL DEFAULT 0")
         self.connection.commit()
         self.failed_requests = 0
-        self.started_at = datetime.now(timezone.utc)
+        self.started_at = datetime.now(UTC)
         self.total = 0
         self.handoffs = 0
         self.intents: Counter[str] = Counter()
@@ -167,15 +168,20 @@ class WorkflowMetrics:
         self.records = self.recent(50)
 
     def _ensure_column(self, name: str, declaration: str) -> None:
-        columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(workflow_conversations)")}
+        columns = {
+            row["name"]
+            for row in self.connection.execute("PRAGMA table_info(workflow_conversations)")
+        }
         if name not in columns:
-            self.connection.execute(f"ALTER TABLE workflow_conversations ADD COLUMN {name} {declaration}")
+            self.connection.execute(
+                f"ALTER TABLE workflow_conversations ADD COLUMN {name} {declaration}"
+            )
             self.connection.commit()
 
     def archive(self, *, session_id: str, message: str, answer: dict[str, Any]) -> None:
         """Persist a compact recent-conversation record and update counters."""
 
-        created_at = datetime.now(timezone.utc).isoformat()
+        created_at = datetime.now(UTC).isoformat()
         record = {
             "id": str(uuid4()),
             "created_at": created_at,
@@ -458,10 +464,30 @@ def _detect_language(message: str) -> str:
 
 def _detect_intent(message: str) -> tuple[Intent, float]:
     rules: list[tuple[Intent, tuple[str, ...], float]] = [
-        ("after_sales", ("售后", "退款", "退货", "换货", "投诉", "坏了", "refund", "return", "warranty", "damaged", "complaint"), 0.97),
-        ("logistics", ("物流", "快递", "运费", "发货", "发往", "寄到", "寄往", "送到", "配送", "邮寄", "到货", "shipping", "delivery", "tracking", "ship to", "arrive", "enviar"), 0.94),
-        ("quote", ("价格", "多少钱", "报价", "批发", "折扣", "price", "cost", "quote", "discount", "how much"), 0.93),
-        ("specs", ("参数", "规格", "尺寸", "重量", "材质", "续航", "spec", "size", "weight", "material", "battery"), 0.9),
+        (
+            "after_sales",
+            ("售后", "退款", "退货", "换货", "投诉", "坏了", "refund", "return", "warranty",
+             "damaged", "complaint"),
+            0.97,
+        ),
+        (
+            "logistics",
+            ("物流", "快递", "运费", "发货", "发往", "寄到", "寄往", "送到", "配送", "邮寄", "到货",
+             "shipping", "delivery", "tracking", "ship to", "arrive", "enviar"),
+            0.94,
+        ),
+        (
+            "quote",
+            ("价格", "多少钱", "报价", "批发", "折扣", "price", "cost", "quote", "discount",
+             "how much"),
+            0.93,
+        ),
+        (
+            "specs",
+            ("参数", "规格", "尺寸", "重量", "材质", "续航", "spec", "size", "weight", "material",
+             "battery"),
+            0.9,
+        ),
     ]
     for intent, keywords, confidence in rules:
         if any(keyword in message for keyword in keywords):
@@ -471,12 +497,30 @@ def _detect_intent(message: str) -> tuple[Intent, float]:
 
 def _detect_all_intents(message: str) -> list[Intent]:
     rules: list[tuple[Intent, tuple[str, ...]]] = [
-        ("after_sales", ("售后", "退款", "退货", "换货", "投诉", "坏了", "refund", "return", "warranty", "damaged", "complaint")),
-        ("logistics", ("物流", "快递", "运费", "发货", "发往", "寄到", "寄往", "送到", "配送", "邮寄", "到货", "shipping", "delivery", "tracking", "ship to", "arrive", "enviar")),
-        ("quote", ("价格", "多少钱", "报价", "批发", "折扣", "price", "cost", "quote", "discount", "how much")),
-        ("specs", ("参数", "规格", "尺寸", "重量", "材质", "续航", "spec", "size", "weight", "material", "battery")),
+        (
+            "after_sales",
+            ("售后", "退款", "退货", "换货", "投诉", "坏了", "refund", "return", "warranty",
+             "damaged", "complaint"),
+        ),
+        (
+            "logistics",
+            ("物流", "快递", "运费", "发货", "发往", "寄到", "寄往", "送到", "配送", "邮寄", "到货",
+             "shipping", "delivery", "tracking", "ship to", "arrive", "enviar"),
+        ),
+        (
+            "quote",
+            ("价格", "多少钱", "报价", "批发", "折扣", "price", "cost", "quote", "discount",
+             "how much"),
+        ),
+        (
+            "specs",
+            ("参数", "规格", "尺寸", "重量", "材质", "续航", "spec", "size", "weight", "material",
+             "battery"),
+        ),
     ]
-    detected = [intent for intent, keywords in rules if any(keyword in message for keyword in keywords)]
+    detected = [
+        intent for intent, keywords in rules if any(keyword in message for keyword in keywords)
+    ]
     return detected or ["general"]
 
 

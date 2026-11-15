@@ -1,9 +1,12 @@
+from tests import isolation  # noqa: F401 -- isolate database before importing the app
+
+# isort: split
+
 import tempfile
 import unittest
 from pathlib import Path
 
 from app.services.workflow import WorkflowMetrics, analyze_message, build_workflow_answer
-
 
 MODEL_REPLY = "The Nebula ANC Headphones Pro ships to Spain in 5-8 business days."
 

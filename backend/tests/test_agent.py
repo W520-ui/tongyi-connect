@@ -1,8 +1,12 @@
+from tests import isolation  # noqa: F401 -- isolate database before importing the app
+
+# isort: split
+
 import asyncio
-from datetime import datetime, timedelta, timezone
 import json
 import tempfile
 import unittest
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -316,10 +320,10 @@ class SessionStoreTests(unittest.TestCase):
                 Turn(
                     role="user",
                     content="hi",
-                    created_at=datetime.now(timezone.utc).isoformat(),
+                    created_at=datetime.now(UTC).isoformat(),
                 ),
             )
-            expired = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+            expired = (datetime.now(UTC) - timedelta(hours=48)).isoformat()
             store.connection.execute(
                 "UPDATE agent_sessions SET updated_at = ? WHERE session_id = ?",
                 (expired, "s"),

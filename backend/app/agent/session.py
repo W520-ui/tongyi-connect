@@ -1,19 +1,20 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import json
-from pathlib import Path
 import sqlite3
 import threading
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from app.agent.models import Session, Turn
+from app.core.config import get_settings
 
 
 class SessionStore:
     """Persist multi-turn context next to the existing workflow archive."""
 
     def __init__(self, db_path: Path | None = None) -> None:
-        self.db_path = db_path or Path(__file__).resolve().parents[2] / "data" / "workflow.db"
+        self.db_path = db_path or get_settings().workflow_db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(self.db_path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
@@ -41,7 +42,7 @@ class SessionStore:
             return Session(session_id=key)
 
         updated = datetime.fromisoformat(row["updated_at"])
-        if datetime.now(timezone.utc) - updated > timedelta(hours=ttl_hours):
+        if datetime.now(UTC) - updated > timedelta(hours=ttl_hours):
             self.clear(key)
             return Session(session_id=key)
 
@@ -60,7 +61,7 @@ class SessionStore:
     def append(self, session: Session, turn: Turn) -> None:
         session.turns.append(turn)
         del session.turns[:-50]
-        session.updated_at = datetime.now(timezone.utc).isoformat()
+        session.updated_at = datetime.now(UTC).isoformat()
         serialized = json.dumps(
             [
                 {"role": item.role, "content": item.content, "created_at": item.created_at}

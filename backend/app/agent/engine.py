@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import replace
-from datetime import datetime, timezone
-from functools import lru_cache
 import json
 import logging
+from dataclasses import replace
+from datetime import UTC, datetime
+from functools import lru_cache
 from typing import Any
 
 from app.agent.commands import CommandRouter
@@ -193,7 +193,7 @@ class AgentEngine:
             session.last_product_id = analysis.product["id"]
         session.language = ctx.language_override or analysis.language
         if persist:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             self.store.append(
                 session, Turn(role="user", content=request.message, created_at=now)
             )

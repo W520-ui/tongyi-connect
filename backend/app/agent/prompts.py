@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from app.agent.models import AgentContext
 
-
 BASE_SYSTEM_PROMPT = """你是「通译智联」的跨境客服智能体，服务于中小跨境商家。
 工作准则：
 1. 始终使用客户的语言回复；中文咨询用中文，英文咨询用英文，西语咨询用西班牙语。
