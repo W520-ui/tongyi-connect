@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import type { CustomerStrings } from '@/i18n/customer'
 import { LANGUAGE_META } from '@/labels'
 
-defineProps<{ strings: CustomerStrings; handedOff: boolean }>()
+defineProps<{ strings: CustomerStrings; handedOff: boolean; disabled?: boolean }>()
 const locale = defineModel<Language>('locale', { required: true })
 const emit = defineEmits<{ handoff: []; reset: [] }>()
 
@@ -45,13 +45,19 @@ function setLocale(value: unknown) {
           </SelectItem>
         </SelectContent>
       </Select>
-      <Button variant="outline" size="sm" :disabled="handedOff" @click="emit('handoff')">
+      <Button variant="outline" size="sm" :disabled="disabled || handedOff" @click="emit('handoff')">
         <Headset />
         {{ strings.talkToHuman }}
       </Button>
       <Tooltip>
         <TooltipTrigger as-child>
-          <Button variant="ghost" size="icon-sm" :aria-label="strings.newChat" @click="emit('reset')">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            :disabled="disabled"
+            :aria-label="strings.newChat"
+            @click="emit('reset')"
+          >
             <RotateCcw />
           </Button>
         </TooltipTrigger>

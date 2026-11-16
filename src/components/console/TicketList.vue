@@ -15,6 +15,9 @@ defineProps<{
   selectedId: string | null
   tab: HandoffStatus
   counts: Record<HandoffStatus, number>
+  loading?: boolean
+  /** The list could not be loaded at all (nothing to show yet). */
+  failed?: boolean
 }>()
 const emit = defineEmits<{ 'update:tab': [value: HandoffStatus]; select: [id: string] }>()
 
@@ -77,7 +80,9 @@ function onTab(value: string | number) {
           </button>
         </li>
       </ul>
-      <p v-if="!tickets.length" class="px-4 py-12 text-center text-sm text-muted-foreground">这里暂时没有工单</p>
+      <p v-if="failed" class="px-4 py-12 text-center text-sm text-muted-foreground">工单列表暂时无法加载</p>
+      <p v-else-if="loading" class="px-4 py-12 text-center text-sm text-muted-foreground" role="status">正在加载工单…</p>
+      <p v-else-if="!tickets.length" class="px-4 py-12 text-center text-sm text-muted-foreground">这里暂时没有工单</p>
     </ScrollArea>
   </section>
 </template>

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { Boxes, CupSoda, Headphones, Lamp, Package, Truck } from '@lucide/vue'
-import type { Component } from 'vue'
+import { Boxes, CircleAlert, CupSoda, Headphones, Lamp, LoaderCircle, Package, Truck } from '@lucide/vue'
+import { type Component, onMounted } from 'vue'
 
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { products } from '@/fixtures/demo'
+import { useCatalogStore } from '@/stores/catalog'
 
 const ICONS: Record<string, Component> = {
   'headset-pro': Headphones,
@@ -13,11 +14,33 @@ const ICONS: Record<string, Component> = {
 }
 
 const price = new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'USD' })
+const catalog = useCatalogStore()
+onMounted(catalog.refresh)
 </script>
 
 <template>
-  <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-    <Card v-for="product in products" :key="product.id" class="py-5">
+  <div
+    v-if="catalog.error && !catalog.loaded"
+    class="flex flex-col items-center gap-3 rounded-xl border bg-card p-12 text-center text-sm"
+    role="alert"
+  >
+    <CircleAlert class="size-5 text-muted-foreground" aria-hidden="true" />
+    <p class="text-muted-foreground">商品资料加载失败：{{ catalog.error.message }}</p>
+    <Button variant="outline" size="sm" @click="catalog.refresh">重新加载</Button>
+  </div>
+  <div
+    v-else-if="!catalog.loaded"
+    class="flex items-center justify-center gap-2 rounded-xl border bg-card p-12 text-sm text-muted-foreground"
+    role="status"
+  >
+    <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+    正在加载商品资料…
+  </div>
+  <p v-else-if="!catalog.products.length" class="rounded-xl border bg-card p-12 text-center text-sm text-muted-foreground">
+    还没有商品资料
+  </p>
+  <div v-else class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <Card v-for="product in catalog.products" :key="product.id" class="py-5">
       <CardContent class="px-5">
         <div class="flex items-center gap-3">
           <div class="grid size-10 shrink-0 place-items-center rounded-lg bg-muted" aria-hidden="true">

@@ -127,6 +127,7 @@ export interface DashboardOverview {
   started_at: string
 }
 
+// The backend also returns issue_summary here for the legacy route (A.6); the console does not use it.
 export interface RecentInquiry {
   id: string
   conversation_id: string
@@ -145,6 +146,48 @@ export interface RecentInquiry {
 export interface SendMessageRequest {
   content: string
   client_message_id?: string | null
+}
+
+export interface MessagePage {
+  items: HistoryMessage[]
+  has_more: boolean
+}
+
+export interface ResetResult {
+  previous_conversation_id: string
+  conversation: Conversation
+}
+
+export interface HandoffResult {
+  conversation: Conversation
+  ticket: HandoffTicket
+}
+
+// SSE event payloads (A.4).
+export interface ToolStartedEvent {
+  call_id: string
+  round: number
+  name: string
+  args: Record<string, unknown>
+}
+
+export interface ToolFinishedEvent {
+  call_id: string
+  round: number
+  name: string
+  ok: boolean
+  latency_ms: number
+  error: string | null
+}
+
+export interface DeltaEvent {
+  round: number
+  text: string
+}
+
+export interface StreamErrorEvent {
+  code: string
+  message: string
 }
 
 export interface AnalysisUpdate {

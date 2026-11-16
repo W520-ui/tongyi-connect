@@ -1,90 +1,32 @@
 <script setup lang="ts">
-import { Headset } from '@lucide/vue'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { CircleAlert, Headset, LoaderCircle, UserRound, X } from '@lucide/vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import type { HistoryMessage, HistoryRole, Language, Product } from '@/api/types'
 import ChatComposer from '@/components/chat/ChatComposer.vue'
 import ChatHeader from '@/components/chat/ChatHeader.vue'
 import ChatMessage from '@/components/chat/ChatMessage.vue'
 import TypingIndicator from '@/components/chat/TypingIndicator.vue'
 import WelcomePanel from '@/components/chat/WelcomePanel.vue'
-import { customerChat, demoProducts } from '@/fixtures/demo'
-import { customerStrings } from '@/i18n/customer'
+import { Button } from '@/components/ui/button'
+import { usePolling } from '@/composables/usePolling'
+import { activityKind, customerErrorKind, customerStrings } from '@/i18n/customer'
+import { useChatStore } from '@/stores/chat'
 
-// Prototype only: replies are simulated locally. Phase V2 swaps this for the
-// conversation store, the mock backend and real SSE streaming.
-type Topic = 'shipping' | 'lamp' | 'handoff' | 'generic'
-
-const REPLIES: Record<Language, Record<Topic, string>> = {
-  'en-US': {
-    shipping: 'Yes! The Nebula ANC Headphones Pro ships to Spain in 5–8 business days and costs USD 39.00.',
-    lamp: 'The Luma Portable Ambient Lamp is USD 24.00 and ships in 6–10 business days. It runs for 18 hours on one charge.',
-    handoff: "I'm sorry to hear that. I've logged your request, and a member of our team will follow up here shortly.",
-    generic: 'Happy to help! Which product are you interested in, and where should it be delivered?',
-  },
-  'es-ES': {
-    shipping: '¡Sí! Los Nebula ANC Headphones Pro se envían a España en 5–8 días hábiles y cuestan 39,00 USD.',
-    lamp: 'La Luma Portable Ambient Lamp cuesta 24,00 USD y se envía en 6–10 días hábiles. Tiene 18 horas de autonomía.',
-    handoff: 'Siento mucho lo ocurrido. He registrado tu solicitud y una persona de nuestro equipo te responderá aquí en breve.',
-    generic: '¡Con gusto te ayudo! ¿Qué producto te interesa y a qué país debemos enviarlo?',
-  },
-  'zh-CN': {
-    shipping: '可以的！星云降噪耳机 Pro 发往西班牙大约 5–8 个工作日，售价 39 美元。',
-    lamp: '光屿便携氛围灯售价 24 美元，6–10 个工作日送达，充满电可以用 18 小时。',
-    handoff: '非常抱歉给你带来不便！我已经登记了你的诉求，商家会尽快在这里联系你。',
-    generic: '很乐意帮忙！你想了解哪款商品？需要寄到哪个国家？',
-  },
-}
-
-const TOPIC_PRODUCTS: Record<Topic, Product[]> = {
-  shipping: [demoProducts.headset],
-  lamp: [demoProducts.lamp],
-  handoff: [],
-  generic: [],
-}
-
-function topicOf(text: string): Topic {
-  if (/won.?t turn on|broken|damaged|refund|\breturn\b|no encienden?|roto|devol|坏|无法开机|退货|退款/i.test(text)) {
-    return 'handoff'
-  }
-  if (/\blamp\b|lámpara|氛围灯/i.test(text)) return 'lamp'
-  if (/\bship|deliver|envi|envío|españa|spain|西班牙|发往|物流/i.test(text)) return 'shipping'
-  return 'generic'
-}
-
-const locale = ref<Language>('en-US')
-const t = computed(() => customerStrings[locale.value])
-const messages = ref<HistoryMessage[]>(customerChat.map((message) => ({ ...message })))
-const typing = ref(false)
-const streamingId = ref<string | null>(null)
-const handedOff = ref(false)
+const chat = useChatStore()
+const t = computed(() => customerStrings[chat.locale])
 const scroller = ref<HTMLElement | null>(null)
 
-let seq = messages.value.length
-const timers = new Set<number>()
+const ready = computed(() => chat.phase === 'ready')
+const staffJoined = computed(() => chat.status === 'human_active')
+const activityText = computed(() => (chat.activity ? t.value.activity[activityKind(chat.activity)] : null))
+const noticeText = computed(() => (chat.notice ? t.value.errors[customerErrorKind(chat.notice.code)] : null))
+const lastEntry = computed(() => chat.entries[chat.entries.length - 1])
 
-function later(callback: () => void, ms: number) {
-  const id = window.setTimeout(() => {
-    timers.delete(id)
-    callback()
-  }, ms)
-  timers.add(id)
-}
+// While a person is involved, pick up the merchant acknowledging or resolving the chat.
+usePolling(chat.refreshStatus, 10_000, () => ready.value && chat.handedOff)
 
-function makeMessage(role: HistoryRole, content: string, products: Product[] = []): HistoryMessage {
-  seq += 1
-  return {
-    id: `local-${seq}`,
-    seq,
-    role,
-    content,
-    created_at: new Date().toISOString(),
-    client_message_id: null,
-    workflow:
-      role === 'assistant' && products.length
-        ? ({ matched_products: products } as unknown as HistoryMessage['workflow'])
-        : null,
-  }
+function nearBottom(el: HTMLElement): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 120
 }
 
 async function scrollToEnd(smooth = true) {
@@ -93,52 +35,46 @@ async function scrollToEnd(smooth = true) {
   if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
 }
 
-function send(text: string) {
-  if (typing.value || streamingId.value) return
-  messages.value.push(makeMessage('user', text))
-  typing.value = true
-  void scrollToEnd()
+// Anything that changes the height near the end: new messages, streamed text,
+// product cards appearing after a reply, the handoff banner, the error notice.
+const layout = computed(() =>
+  [
+    chat.entries.length,
+    lastEntry.value?.content,
+    lastEntry.value?.products.length,
+    lastEntry.value?.status,
+    chat.waiting,
+    chat.streamingKey,
+    chat.handedOff,
+    chat.notice?.code,
+  ].join('|'),
+)
+// Measured before Vue updates the DOM: was the customer reading the end?
+let following = true
+watch(layout, () => (following = !scroller.value || nearBottom(scroller.value)), { flush: 'pre' })
+watch(
+  layout,
+  () => {
+    // Their own message always scrolls into view; otherwise only follow the end.
+    if (following || lastEntry.value?.role === 'user') void scrollToEnd(false)
+  },
+  { flush: 'post' },
+)
 
-  const topic = topicOf(text)
-  const reply = REPLIES[locale.value][topic]
-  later(() => {
-    typing.value = false
-    messages.value.push(makeMessage('assistant', '', TOPIC_PRODUCTS[topic]))
-    const target = messages.value[messages.value.length - 1]
-    if (!target) return
-    streamingId.value = target.id
-    let shown = 0
-    const tick = () => {
-      shown = Math.min(reply.length, shown + 3)
-      target.content = reply.slice(0, shown)
-      void scrollToEnd(false)
-      if (shown < reply.length) {
-        later(tick, 18)
-        return
-      }
-      streamingId.value = null
-      if (topic === 'handoff') handedOff.value = true
-      void scrollToEnd()
-    }
-    tick()
-  }, 850)
+async function loadOlder() {
+  const el = scroller.value
+  const before = el ? el.scrollHeight - el.scrollTop : 0
+  await chat.loadOlder()
+  await nextTick()
+  // Keep the message the customer was looking at in place.
+  if (el) el.scrollTop = el.scrollHeight - before
 }
 
-function clearTimers() {
-  timers.forEach((id) => window.clearTimeout(id))
-  timers.clear()
-}
-
-function reset() {
-  clearTimers()
-  messages.value = []
-  typing.value = false
-  streamingId.value = null
-  handedOff.value = false
-}
-
-onMounted(() => void scrollToEnd(false))
-onBeforeUnmount(clearTimers)
+onMounted(async () => {
+  await chat.connect()
+  void scrollToEnd(false)
+})
+onBeforeUnmount(chat.cancel)
 </script>
 
 <template>
@@ -148,11 +84,13 @@ onBeforeUnmount(clearTimers)
       aria-label="Customer support chat"
     >
       <ChatHeader
-        v-model:locale="locale"
+        :locale="chat.locale"
         :strings="t"
-        :handed-off="handedOff"
-        @handoff="handedOff = true"
-        @reset="reset"
+        :handed-off="chat.handedOff"
+        :disabled="!ready || chat.busy"
+        @update:locale="chat.setLocale"
+        @handoff="chat.requestHandoff"
+        @reset="chat.startNewChat"
       />
 
       <Transition
@@ -161,29 +99,78 @@ onBeforeUnmount(clearTimers)
         leave-active-class="transition duration-150 ease-in"
         leave-to-class="-translate-y-1 opacity-0"
       >
-        <div v-if="handedOff" class="flex items-start gap-3 border-b bg-warning-soft px-5 py-3 text-warning" role="status">
-          <Headset class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        <div
+          v-if="chat.handedOff"
+          class="flex items-start gap-3 border-b px-5 py-3"
+          :class="staffJoined ? 'bg-info-soft text-info' : 'bg-warning-soft text-warning'"
+          role="status"
+        >
+          <component :is="staffJoined ? UserRound : Headset" class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
           <div class="text-[13px] leading-relaxed">
-            <p class="font-medium">{{ t.handoffTitle }}</p>
-            <p>{{ t.handoffBody }}</p>
+            <p class="font-medium">{{ staffJoined ? t.staffTitle : t.handoffTitle }}</p>
+            <p>{{ staffJoined ? t.staffBody : t.handoffBody }}</p>
           </div>
         </div>
       </Transition>
 
-      <div ref="scroller" class="flex flex-1 flex-col gap-5 overflow-y-auto px-4 py-6 [scrollbar-width:thin] sm:px-6">
-        <WelcomePanel v-if="!messages.length" :strings="t" @pick="send" />
-        <ChatMessage
-          v-for="message in messages"
-          :key="message.id"
-          :message="message"
-          :locale="locale"
-          :strings="t"
-          :streaming="message.id === streamingId"
-        />
-        <TypingIndicator v-if="typing" :label="t.typing" />
+      <div v-if="chat.phase === 'failed'" class="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+        <CircleAlert class="size-6 text-muted-foreground" aria-hidden="true" />
+        <p class="font-medium">{{ t.connectFailed }}</p>
+        <p v-if="chat.connectError" class="max-w-sm text-sm text-muted-foreground">
+          {{ t.errors[customerErrorKind(chat.connectError.code)] }}
+        </p>
+        <Button variant="outline" size="sm" @click="chat.connect">{{ t.tryAgain }}</Button>
       </div>
 
-      <ChatComposer :strings="t" :disabled="typing || Boolean(streamingId)" @send="send" />
+      <div
+        v-else-if="!ready"
+        class="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"
+        role="status"
+      >
+        <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+        {{ t.connecting }}
+      </div>
+
+      <div
+        v-else
+        ref="scroller"
+        class="flex flex-1 flex-col gap-5 overflow-y-auto px-4 py-6 [scrollbar-width:thin] sm:px-6"
+        aria-live="polite"
+      >
+        <div v-if="chat.hasMore" class="flex justify-center">
+          <Button variant="ghost" size="sm" :disabled="chat.loadingOlder" @click="loadOlder">
+            <LoaderCircle v-if="chat.loadingOlder" class="animate-spin" />
+            {{ t.earlier }}
+          </Button>
+        </div>
+        <WelcomePanel v-if="!chat.entries.length && !chat.waiting" :strings="t" @pick="chat.send" />
+        <ChatMessage
+          v-for="entry in chat.entries"
+          :key="entry.key"
+          :entry="entry"
+          :locale="chat.locale"
+          :strings="t"
+          :streaming="entry.key === chat.streamingKey"
+          :busy="chat.busy"
+          @retry="chat.retry"
+        />
+        <TypingIndicator v-if="chat.waiting" :label="t.typing" :activity="activityText" />
+      </div>
+
+      <div v-if="noticeText" class="flex items-start gap-2 border-t bg-muted/60 px-5 py-2.5 text-[13px]" role="alert">
+        <CircleAlert class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
+        <p class="flex-1 text-muted-foreground">{{ noticeText }}</p>
+        <button
+          type="button"
+          class="cursor-pointer rounded text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          :aria-label="t.dismiss"
+          @click="chat.dismissNotice"
+        >
+          <X class="size-4" />
+        </button>
+      </div>
+
+      <ChatComposer :strings="t" :disabled="!ready || chat.busy" @send="chat.send" />
     </section>
     <p class="mt-3 hidden text-xs text-muted-foreground sm:block">{{ t.poweredBy }}</p>
   </div>
