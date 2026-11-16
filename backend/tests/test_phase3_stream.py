@@ -115,6 +115,40 @@ def test_stream_run_failures_are_error_events_without_completed(api_client):
     ]
 
 
+def test_stream_failed_message_id_retries_then_replays_success(api_client):
+    client, runtime = api_client
+    conversation_id = create(client)
+    runtime.provider.streams.extend(
+        [[AppError("LLM_TIMEOUT")], [StreamChunk(content="Hello after retry")]]
+    )
+    request = {"content": "Hello", "client_message_id": "stream-retry"}
+    response = client.post(path(conversation_id, "/messages/stream"), json=request)
+    events = parse_events(response.text)
+    assert [name for name, _data in events] == ["error"]
+    assert events[0][1]["code"] == "LLM_TIMEOUT"
+    original = runtime.rows(StoredMessage)[0]
+    response = client.post(path(conversation_id, "/messages/stream"), json=request)
+    assert response.status_code == 200
+    events = parse_events(response.text)
+    assert [name for name, _data in events] == ["delta", "completed", "analysis"]
+    retried = events[1][1]["data"]
+    assert retried["reply"] == "Hello after retry" and retried["replayed"] is False
+    assert retried["message_id"] == original.id
+    response = client.post(path(conversation_id, "/messages/stream"), json=request)
+    events = parse_events(response.text)
+    assert [name for name, _data in events] == ["completed"]
+    assert events[0][1]["data"] == {
+        **retried,
+        "analysis_source": "heuristic",
+        "replayed": True,
+    }
+    assert len(runtime.provider.calls) == len(runtime.rows(AgentRun)) == 2
+    assert [(message.role, message.content) for message in runtime.rows(StoredMessage)] == [
+        ("user", "Hello"),
+        ("assistant", "Hello after retry"),
+    ]
+
+
 def test_stream_replay_commands_and_human_pause_complete_once(api_client):
     client, runtime = api_client
     conversation_id = create(client)

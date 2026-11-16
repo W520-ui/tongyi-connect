@@ -157,6 +157,21 @@ class ConversationService:
                         if emit:
                             await emit(WorkflowCompleted(replay))
                         return replay
+                    saved_message = (
+                        next(
+                            (
+                                turn
+                                for turn in snapshot.turns
+                                if turn.role == "user"
+                                and turn.client_message_id == inbound.client_message_id
+                            ),
+                            None,
+                        )
+                        if inbound.client_message_id
+                        else None
+                    )
+                    if saved_message:
+                        inbound = replace(inbound, message=saved_message.content)
                     parsed = self.commands.parse(inbound.message)
                     if not inbound.legacy_session and not parsed:
                         if (
@@ -186,11 +201,13 @@ class ConversationService:
                                 await emit(WorkflowCompleted(result))
                             return result
                     if snapshot.status == "human_active":
-                        result = await self._paused(snapshot, inbound)
+                        result = await self._paused(snapshot, inbound, saved_message=saved_message)
                         if emit:
                             await emit(WorkflowCompleted(result))
                         return result
-                    return await self._run(snapshot, inbound, emit=emit)
+                    return await self._run(
+                        snapshot, inbound, emit=emit, saved_message=saved_message
+                    )
         except AppError as error:
             if not error.recorded:
                 await self.analytics.record_failed_request(error.code)
@@ -225,12 +242,11 @@ class ConversationService:
             if user.workflow:
                 return replace(restore_result(user.workflow), replayed=True)
             run = await transaction.scalar(
-                select(AgentRun).where(AgentRun.trigger_message_id == user.id)
+                select(AgentRun)
+                .where(AgentRun.trigger_message_id == user.id, AgentRun.status == "ok")
+                .order_by(AgentRun.created_at.desc())
+                .limit(1)
             )
-            if run and run.status == "error":
-                error = AppError(run.error_code)
-                error.recorded = True
-                raise error
             return (
                 replace(restore_result(run.workflow), replayed=True)
                 if run and run.workflow
@@ -280,7 +296,7 @@ class ConversationService:
             handoff_id=handoff_id,
         )
 
-    async def _paused(self, snapshot, inbound, *, persist=True):
+    async def _paused(self, snapshot, inbound, *, persist=True, saved_message=None):
         language = snapshot.reply_language
         if not language:
             language = (
@@ -300,15 +316,27 @@ class ConversationService:
             handoff_id=ticket.id if ticket else None,
         )
         if persist:
-            message_id = str(uuid4())
+            message_id = saved_message.id if saved_message else str(uuid4())
             result = replace(result, message_id=message_id, steps=("保存客户消息，等待人工回复",))
             async with self.database.transaction() as transaction:
                 await self.store.update(transaction, snapshot, last_message_at=now())
-                await self.store.append(
-                    transaction,
-                    snapshot,
-                    [self._user_message(inbound, result, None, workflow=asdict(result))],
-                )
+                if saved_message is None:
+                    await self.store.append(
+                        transaction,
+                        snapshot,
+                        [self._user_message(inbound, result, None, workflow=asdict(result))],
+                    )
+                else:
+                    # Retried customer rows are append-only; persist the local reply as a receipt.
+                    transaction.add(
+                        CommandReceipt(
+                            merchant_id=self.settings.merchant_id,
+                            conversation_id=snapshot.session_id,
+                            client_message_id=inbound.client_message_id,
+                            workflow=asdict(result),
+                            created_at=now(),
+                        )
+                    )
         return result
 
     def _user_message(self, inbound, result, run_id, *, workflow=None):
@@ -323,12 +351,19 @@ class ConversationService:
             "workflow": workflow,
         }
 
-    async def _run(self, snapshot, inbound, *, emit=None):
+    async def _run(self, snapshot, inbound, *, emit=None, saved_message=None):
         started = perf_counter()
         analysis = analyze_message(
             inbound.message, await self.catalog.list_products(), snapshot.last_product_id
         )
-        built = await self.context.build_details(inbound, snapshot)
+        context_snapshot = (
+            replace(
+                snapshot, turns=[turn for turn in snapshot.turns if turn.id != saved_message.id]
+            )
+            if saved_message
+            else snapshot
+        )
+        built = await self.context.build_details(inbound, context_snapshot)
         completed, observed = None, {}
         failure = None
         steps = ["加载会话上下文"]
@@ -354,7 +389,16 @@ class ConversationService:
             if completed is None:
                 raise AppError("INTERNAL_ERROR")
         except AppError as error:
-            await self._save_failure(snapshot, inbound, analysis, error, observed, started, failure)
+            await self._save_failure(
+                snapshot,
+                inbound,
+                analysis,
+                error,
+                observed,
+                started,
+                failure,
+                saved_message=saved_message,
+            )
             error.recorded = True
             raise
         effects = list(completed.effects)
@@ -378,7 +422,11 @@ class ConversationService:
         products = await self._products(snapshot)
         if focus and products:
             analysis = replace(analysis, product=products[0], product_confidence=0.96)
-        run_id, message_id, timestamp = str(uuid4()), str(uuid4()), now()
+        run_id, message_id, timestamp = (
+            str(uuid4()),
+            saved_message.id if saved_message else str(uuid4()),
+            now(),
+        )
         handoff_effect = next(
             (effect for effect in effects if isinstance(effect, RequestHandoff)), None
         )
@@ -409,7 +457,7 @@ class ConversationService:
                 completed.trace,
                 message_id=message_id,
             )
-            messages = [self._user_message(inbound, provisional, run_id)]
+            messages = [] if saved_message else [self._user_message(inbound, provisional, run_id)]
             messages.extend(
                 {
                     "id": str(uuid4()),
@@ -538,8 +586,11 @@ class ConversationService:
             return result, fallback
         return final, outcome
 
-    async def _save_failure(self, snapshot, inbound, analysis, error, observed, started, failure):
-        message_id, run_id = str(uuid4()), str(uuid4())
+    async def _save_failure(
+        self, snapshot, inbound, analysis, error, observed, started, failure, *, saved_message=None
+    ):
+        message_id = saved_message.id if saved_message else str(uuid4())
+        run_id = str(uuid4())
         result = WorkflowResult(
             "",
             "",
@@ -572,9 +623,10 @@ class ConversationService:
                 status="bot_active" if snapshot.status == "resolved" else snapshot.status,
                 last_message_at=now(),
             )
-            await self.store.append(
-                transaction, snapshot, [self._user_message(inbound, result, run_id)]
-            )
+            if saved_message is None:
+                await self.store.append(
+                    transaction, snapshot, [self._user_message(inbound, result, run_id)]
+                )
             transaction.add(
                 AgentRun(
                     id=run_id,

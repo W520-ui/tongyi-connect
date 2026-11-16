@@ -361,18 +361,73 @@ async def test_http_concurrent_duplicate_waits_and_different_messages_keep_order
     assert [item["seq"] for item in history] == [1, 2, 3, 4]
 
 
-def test_failed_message_id_replays_error_without_another_run(api_client):
+@pytest.mark.parametrize("failures", [1, 2])
+@pytest.mark.parametrize("retry_content", ["Hello", "/reset"])
+def test_failed_message_id_retries_without_appending_customer_message(
+    api_client, failures, retry_content
+):
+    client, runtime = api_client
+    conversation_id = create(client)
+    runtime.provider.decisions.extend(
+        [AppError("LLM_TIMEOUT") for _ in range(failures)] + [Decision(reply="Hello after retry")]
+    )
+    request = {"content": "Hello", "client_message_id": "failure"}
+    for _ in range(failures):
+        response = client.post(path(conversation_id, "/messages"), json=request)
+        assert_error(response, 504, "LLM_TIMEOUT")
+    original = runtime.rows(StoredMessage)[0]
+    response = client.post(
+        path(conversation_id, "/messages"), json={**request, "content": retry_content}
+    )
+    assert response.status_code == 200, response.text
+    retried = response.json()["data"]
+    assert retried["reply"] == "Hello after retry" and retried["replayed"] is False
+    assert retried["message_id"] == original.id
+    assert retried["client_message_id"] == "failure"
+    replay = client.post(path(conversation_id, "/messages"), json=request).json()["data"]
+    assert replay == {**retried, "replayed": True}
+    messages = runtime.rows(StoredMessage)
+    assert [(message.role, message.content) for message in messages] == [
+        ("user", "Hello"),
+        ("assistant", "Hello after retry"),
+    ]
+    assert [message.seq for message in messages] == [1, 2]
+    assert messages[0].id == original.id and messages[0].run_id == original.run_id
+    assert sum(message.client_message_id == "failure" for message in messages) == 1
+    runs = runtime.rows(AgentRun)
+    assert len(runs) == len(runtime.provider.calls) == failures + 1
+    assert sum(run.status == "error" for run in runs) == failures
+    assert all(run.trigger_message_id == original.id for run in runs)
+    assert next(run.id for run in runs if run.status == "ok") == retried["run_id"]
+    assert all(
+        [message.content for message in call["messages"] if message.role == "user"] == ["Hello"]
+        for call in runtime.provider.calls
+    )
+    assert runtime.snapshot()["failed_requests"] == failures
+    assert runtime.snapshot()["total_conversations"] == 1
+
+
+def test_failed_message_retry_after_handoff_replays_pause_without_duplicate(api_client):
     client, runtime = api_client
     conversation_id = create(client)
     runtime.provider.decisions.append(AppError("LLM_TIMEOUT"))
-    for _ in range(2):
-        response = client.post(
-            path(conversation_id, "/messages"),
-            json={"content": "Hello", "client_message_id": "failure"},
-        )
-        assert_error(response, 504, "LLM_TIMEOUT")
-    assert len(runtime.provider.calls) == len(runtime.rows(AgentRun)) == 1
-    assert runtime.snapshot()["failed_requests"] == runtime.snapshot()["total_conversations"] == 1
+    request = {"content": "Hello", "client_message_id": "paused-retry"}
+    response = client.post(path(conversation_id, "/messages"), json=request)
+    assert_error(response, 504, "LLM_TIMEOUT")
+    original = runtime.rows(StoredMessage)[0]
+    handoff = client.post(path(conversation_id, "/handoff"), json={}).json()["data"]["ticket"]
+    assert client.post(f"{PREFIX}/handoffs/{handoff['id']}/acknowledge").status_code == 200
+    runtime.provider.is_configured = False
+    response = client.post(path(conversation_id, "/messages"), json=request)
+    assert response.status_code == 200, response.text
+    paused = response.json()["data"]
+    assert paused["source"] == "paused-for-human" and paused["run_id"] is None
+    assert paused["message_id"] == original.id
+    replay = client.post(path(conversation_id, "/messages"), json=request).json()["data"]
+    assert replay == {**paused, "replayed": True}
+    assert len(runtime.rows(StoredMessage)) == 1
+    assert len(runtime.rows(AgentRun)) == len(runtime.provider.calls) == 1
+    assert runtime.snapshot()["total_conversations"] == 1
 
 
 @pytest.mark.parametrize("secret", [None, "merchant-secret"])
