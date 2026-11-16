@@ -2,7 +2,7 @@
 
 - **决定（2026-11-14，负责人确认）：** 前端从零重写；客户窗口和商家控制台完全分开；视觉重新设计；组件库由 Claude 选定。
 - **分工：** 后端由 GPT 按 `docs/backend-prompt.md` 重构；前端只按其中的附录 A（接口契约 v0.1）对接，不使用任何旧接口。
-- **分支：** `frontend/v2`（在 worktree `D:\10178\Projects\tongyi-connect-frontend` 里），不推送，由负责人合并。
+- **分支：** 视觉原型在 `frontend/v2`；接真实接口的工作在 `frontend/integration`（从 `backend/phase-3` 拉出），都在 worktree `D:\10178\Projects\tongyi-connect-frontend` 里，不推送，由负责人合并。
 
 ## 1. 技术选型
 
@@ -11,9 +11,8 @@
 | 框架 | Vue 3 + TypeScript + Vite + Vue Router + Pinia | 沿用现有技术栈 |
 | 组件库 | shadcn-vue（Reka UI + Tailwind CSS v4，经典 vega 风格，中性灰底） | 负责人认为 Naive UI 太常见，要现代风格、不用渐变。shadcn-vue 的组件代码放在我们自己的仓库里，外观完全可控 |
 | 视觉 | 纯色、细边框、基本不用阴影；主按钮近黑色；品牌青绿只用于标志、状态点等少数点缀 | 2026-11-14 负责人确认效果图 |
-| 图标 | lucide-vue-next | 线条统一、仍在维护 |
+| 图标 | @lucide/vue | 线条统一、仍在维护 |
 | 字体 | Inter（@fontsource-variable，本地打包）+ 系统中文字体 | 不依赖外部 CDN |
-| 模拟后端 | Vite 开发服务器中间件，按附录 A 实现 | 不加运行时依赖，SSE 行为和真实后端一致；用 `vite --mode mock` 启动 |
 | 测试 | Vitest + Vue Test Utils + jsdom | F0 已搭好 |
 
 ## 2. 页面
@@ -28,36 +27,18 @@
 
 - 收件箱 `/console/inbox`：左边是工单列表（待接管 / 处理中 / 已解决），右边是选中会话的详情，包括中文摘要、对话记录、Agent 轨迹、确认接管、标记解决；
 - 数据看板 `/console/dashboard`：关键指标、意图分布、语言分布、最近咨询；
-- 商品资料 `/console/catalog`、系统状态 `/console/system`；
+- 商品资料 `/console/catalog`、系统状态 `/console/system`（含商家密钥）；
 - 支持深色模式。
 
-## 3. 目录
+## 3. 阶段与进度
 
-```text
-src/
-├── api/          附录 A 的类型、请求封装、SSE 客户端、各资源的接口函数
-├── stores/       Pinia：conversation（客户窗口）、inbox、dashboard、system
-├── theme/        Naive UI 主题（浅色 / 深色）
-├── i18n/         客户窗口的三语文案
-├── layouts/      ConsoleLayout
-├── pages/        chat/、console/
-├── components/   chat/、console/
-└── fixtures/     原型阶段的演示数据（接上模拟后端后删除）
-mock/             Vite 模拟后端（只在 --mode mock 下启用）
-```
+1. **V1 视觉原型（已完成）：** 主题、两个页面的布局和组件，用演示数据；负责人确认了视觉。
+2. **V2 数据层 + V4 联调（已完成，2026-11-16）：** 后端第 3 阶段提前完成，所以没有再写 Vite 模拟后端，直接对接真实接口：
+   - `api/`：成功与错误信封、错误码、超时与取消、SSE 解析（心跳、30 秒无数据中止、按轮次丢弃开场白）、幂等重试；
+   - Pinia store：`chat`、`inbox`、`dashboard`、`catalog`、`system`；工单和看板每 10 秒刷新，页面隐藏时暂停；
+   - 删除 `fixtures/`；补充接口层与 store 的单元测试；
+   - 用真实后端加脚本化的假模型，在浏览器里走通：流式回复、历史恢复、转人工、确认接管、人工期间的固定提示、标记解决、切换语言、断网重试、商家密钥。
+3. **V3 完整功能（部分完成）：** 已完成确认和解决、看板定时刷新、历史恢复、错误码提示、深色模式。还剩：移动端细节、长会话的工单详情分页。
+4. **待负责人：** 配置真实模型密钥后，按附录 A.7 的流程做一次真实模型验证。
 
-## 4. 阶段
-
-1. **V1 视觉原型：** 主题、两个页面的布局和组件，先用 `fixtures/` 里的演示数据。截图给负责人确认视觉。
-2. **V2 数据层：** `api/`（类型、错误信封、SSE 解析：轮次重置、心跳超时、幂等重试）、Pinia store、`mock/` 模拟后端。页面改为走真实的数据流，删掉 `fixtures/`。
-3. **V3 完整功能：** 收件箱的确认和解决、看板定时刷新、历史恢复、错误码提示、深色模式、移动端适配。
-4. **V4 联调：** 后端第 3 阶段完成后，换成真实接口，跑通演示流程，更新根目录 README。
-
-每个阶段都要求：`npm run build` 和 `npm run test` 通过，并在内置浏览器里截图验证。
-
-## 5. 需要后端提供的东西
-
-| 需要什么 | 什么时候要用 |
-|---|---|
-| `GET /api/v1/status`、`python -m app.scripts.export_openapi`（后端第 1 阶段） | V3 生成类型、核对契约 |
-| 附录 A 的全部新接口（后端第 3 阶段） | V4 联调 |
+每个阶段都要求：`npm run build` 和 `npm run test` 通过，并在浏览器里截图验证。截图在 `docs/design/`（`v1*` 为视觉原型，`v2*` 为接通真实接口后）。
